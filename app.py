@@ -1,7 +1,6 @@
 # app.py
 # CORTEX DICTIONARY LAB – Single File Prototype
-# Data-driven + Excel-driven Lexicography Lab
-# Per-sense collocates and per-sense KWIC
+# Robust XML parsing (lxml) + per-sense collocates + per-sense KWIC
 
 import streamlit as st
 import pandas as pd
@@ -9,7 +8,7 @@ import numpy as np
 import re
 import math
 import random
-import xml.etree.ElementTree as ET
+from lxml import etree
 from collections import Counter, defaultdict
 
 # ===============================
@@ -57,39 +56,76 @@ def build_thesaurus_link(word, lang):
     return "NA"
 
 # ===============================
-# XML Parsing
+# Robust XML Parsing (FIXED)
 # ===============================
 
 def parse_xml_file(file):
-    content = file.read().decode("utf-8", errors="ignore")
-    root = ET.fromstring(content)
+    content = file.read()
+
+    try:
+        parser = etree.XMLParser(recover=True, encoding="utf-8")
+        root = etree.fromstring(content, parser=parser)
+    except Exception as e:
+        st.error(f"XML parsing failed: {e}")
+        return pd.DataFrame(), {}
 
     rows = []
     attributes_detected = defaultdict(set)
 
+    # Collect all attributes in document
     for elem in root.iter():
         for k, v in elem.attrib.items():
             attributes_detected[k].add(v)
 
     sent_id = 0
-    for sent in root.findall(".//s") + root.findall(".//sent"):
+
+    # Common sentence tags
+    sentences = (
+        root.findall(".//s") +
+        root.findall(".//sent") +
+        root.findall(".//sentence")
+    )
+
+    # Fallback: no sentence tags
+    if not sentences:
+        text = etree.tostring(root, method="text", encoding="unicode")
+        toks = tokenize(text)
+        for i, t in enumerate(toks, start=1):
+            rows.append({
+                "token": t,
+                "pos": "NA",
+                "lemma": "NA",
+                "sent_id": i
+            })
+        return pd.DataFrame(rows), attributes_detected
+
+    for sent in sentences:
         sent_id += 1
-        tokens = sent.findall(".//w")
-        if tokens:
-            for w in tokens:
+
+        # Word-level tagging
+        words = sent.findall(".//w") + sent.findall(".//tok") + sent.findall(".//word")
+
+        if words:
+            for w in words:
                 token = w.text.strip() if w.text else ""
-                pos = w.get("pos", "NA")
+                pos = w.get("pos", w.get("type", "NA"))
                 lemma = w.get("lemma", "NA")
+
                 row = {
                     "token": token,
                     "pos": pos,
                     "lemma": lemma,
                     "sent_id": sent_id
                 }
+
+                # Capture sentence-level attributes (domain, year, register, etc.)
                 for k, v in sent.attrib.items():
                     row[k] = v
+
                 rows.append(row)
+
         else:
+            # Fallback to raw text
             raw = "".join(sent.itertext())
             toks = tokenize(raw)
             for t in toks:
@@ -100,7 +136,8 @@ def parse_xml_file(file):
                     "sent_id": sent_id
                 })
 
-    return pd.DataFrame(rows), attributes_detected
+    df = pd.DataFrame(rows)
+    return df, attributes_detected
 
 # ===============================
 # N-gram computation
@@ -112,32 +149,24 @@ def compute_ngrams(tokens, target):
     trigrams = Counter()
 
     for i in range(len(tokens) - 1):
-        bg = (tokens[i], tokens[i+1])
-        bigrams[bg] += 1
+        bigrams[(tokens[i], tokens[i+1])] += 1
 
     for i in range(len(tokens) - 2):
-        tg = (tokens[i], tokens[i+1], tokens[i+2])
-        trigrams[tg] += 1
+        trigrams[(tokens[i], tokens[i+1], tokens[i+2])] += 1
 
     wc = {bg: c for bg, c in bigrams.items() if bg[0].lower() == target.lower()}
     cw = {bg: c for bg, c in bigrams.items() if bg[1].lower() == target.lower()}
-
-    top_wc = sorted(wc.items(), key=lambda x: x[1], reverse=True)[:2]
-    top_cw = sorted(cw.items(), key=lambda x: x[1], reverse=True)[:2]
 
     wcc = {tg: c for tg, c in trigrams.items() if tg[0].lower() == target.lower()}
     cwc = {tg: c for tg, c in trigrams.items() if tg[1].lower() == target.lower()}
     ccw = {tg: c for tg, c in trigrams.items() if tg[2].lower() == target.lower()}
 
-    top_wcc = sorted(wcc.items(), key=lambda x: x[1], reverse=True)[:1]
-    top_cwc = sorted(cwc.items(), key=lambda x: x[1], reverse=True)[:1]
-    top_ccw = sorted(ccw.items(), key=lambda x: x[1], reverse=True)[:1]
-
     result = []
-    for (bg, _) in top_wc + top_cw:
-        result.append(" ".join(bg))
-    for (tg, _) in top_wcc + top_cwc + top_ccw:
-        result.append(" ".join(tg))
+    result += [" ".join(bg) for bg, _ in sorted(wc.items(), key=lambda x: x[1], reverse=True)[:2]]
+    result += [" ".join(bg) for bg, _ in sorted(cw.items(), key=lambda x: x[1], reverse=True)[:2]]
+    result += [" ".join(tg) for tg, _ in sorted(wcc.items(), key=lambda x: x[1], reverse=True)[:1]]
+    result += [" ".join(tg) for tg, _ in sorted(cwc.items(), key=lambda x: x[1], reverse=True)[:1]]
+    result += [" ".join(tg) for tg, _ in sorted(ccw.items(), key=lambda x: x[1], reverse=True)[:1]]
 
     return result
 
@@ -264,6 +293,7 @@ if mode == "Data-driven (Corpus)":
                         "lemma": ["NA"] * len(toks),
                         "sent_id": list(range(1, len(toks)+1))
                     })
+
                 df["corpus"] = selected_corpus
                 st.session_state["corpora"][selected_corpus].append(df)
 
