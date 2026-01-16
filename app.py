@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Corpus Dictionary", page_icon="📘", layout="wide")
 
@@ -68,7 +67,7 @@ html, body, [class*="css"]  {
     color: #e0e0e0;
 }
 
-/* Box sections (ngrams, collocates, etc) */
+/* Box sections */
 .box {
     background: #1a1d23;
     padding: 12px;
@@ -105,10 +104,26 @@ a {
 a:hover {
     text-decoration: underline;
 }
+
+/* Zipf bar container */
+.zipf-container {
+    background: #333;
+    border-radius: 6px;
+    width: 200px;
+    height: 10px;
+    margin-top: 6px;
+    margin-bottom: 6px;
+    overflow: hidden;
+}
+
+/* Zipf bar fill */
+.zipf-bar {
+    background: linear-gradient(90deg, #ffd200, #ffb300);
+    height: 100%;
+}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("")
 
 # =========================
 # Helpers
@@ -143,45 +158,57 @@ def get_sense(row, prefix):
         "band": safe(row.get(f"{prefix}_band")),
     }
 
-def plot_freq(sense_label, sense):
-    values, labels = [], []
+def render_frequency_block(sense):
+    freq = sense["frequency"]
+    pmw = sense["pmw"]
+    zipf = sense["zipf"]
 
-    if sense["frequency"]:
-        values.append(float(sense["frequency"]))
-        labels.append("Freq")
-    if sense["pmw"]:
-        values.append(float(sense["pmw"]))
-        labels.append("PMW")
-    if sense["zipf"]:
-        values.append(float(sense["zipf"]))
-        labels.append("Zipf")
+    parts = []
+    if freq:
+        parts.append(f"<b>Freq:</b> {freq}")
+    if pmw:
+        parts.append(f"<b>Rel:</b> {pmw} pmw")
 
-    if not values:
-        st.info("No frequency data available.")
-        return
+    if parts:
+        st.markdown(" · ".join(parts), unsafe_allow_html=True)
 
-    fig, ax = plt.subplots()
-    ax.bar(labels, values)
-    ax.set_title(f"{sense_label} Frequency Profile")
-    ax.set_facecolor("#1a1d23")
-    fig.patch.set_facecolor("#1a1d23")
-    ax.tick_params(colors="white")
-    ax.title.set_color("white")
-    ax.yaxis.label.set_color("white")
+    # Zipf bar (1–7 scale assumed)
+    if zipf:
+        try:
+            z = float(zipf)
+            width = min(max((z / 7) * 100, 0), 100)
+            st.markdown(f"""
+            <div style="margin-top:6px;">
+                <b>Zipf:</b> {z}
+                <div class="zipf-container">
+                    <div class="zipf-bar" style="width:{width}%"></div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        except:
+            pass
 
-    st.pyplot(fig)
 
 # =========================
 # Upload
 # =========================
 
-uploaded = st.file_uploader("Upload Excel file(s)", type=["xlsx", "xls"], accept_multiple_files=True)
+uploaded = st.file_uploader(
+    "Upload Excel file(s)",
+    type=["xlsx", "xls"],
+    accept_multiple_files=True
+)
 
 if not uploaded:
     st.info("Upload your dictionary Excel file(s) to begin.")
     st.stop()
 
 df = load_excels(uploaded)
+
+if df.empty:
+    st.warning("No data found in uploaded files.")
+    st.stop()
+
 
 # =========================
 # Sidebar Search
@@ -209,8 +236,12 @@ if selected:
 
 if query:
     filtered = filtered[
-        filtered.apply(lambda r: r.astype(str).str.contains(query, case=False, na=False).any(), axis=1)
+        filtered.apply(
+            lambda r: r.astype(str).str.contains(query, case=False, na=False).any(),
+            axis=1
+        )
     ]
+
 
 # =========================
 # Render Entries
@@ -218,14 +249,21 @@ if query:
 
 for _, row in filtered.iterrows():
 
-    main_hw = safe(row.get("sense1_headword")) or safe(row.get("sense2_headword")) or safe(row.get("sense3_headword"))
+    main_hw = (
+        safe(row.get("sense1_headword")) or
+        safe(row.get("sense2_headword")) or
+        safe(row.get("sense3_headword"))
+    )
 
-    phonetic = "/bæŋk/"  # placeholder – later you can add column
-    cefr = f"(CEFR: A2)"  # placeholder – later from column
+    # Optional: later you can add columns for these
+    phonetic = "/bæŋk/"     # placeholder
+    cefr = "(CEFR: A2)"     # placeholder
 
     general_band = safe(row.get("general_band"))
     general_dict = safe(row.get("general_dictionary"))
     general_thes = safe(row.get("general_thesaurus"))
+    related_hw = safe(row.get("general_related_headword"))
+    related_rx = safe(row.get("general_related_regex"))
 
     st.markdown(f'<div class="headword">{main_hw}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="phonetic">{phonetic} {cefr}</div>', unsafe_allow_html=True)
@@ -241,6 +279,11 @@ for _, row in filtered.iterrows():
     if meta_parts:
         st.markdown(f'<div class="meta">{" · ".join(meta_parts)}</div>', unsafe_allow_html=True)
 
+    if related_hw:
+        st.markdown(f"**Related headwords:** {related_hw}")
+    if related_rx:
+        st.markdown(f"**Related regex:** {related_rx}")
+
     # Collect senses
     senses = []
     for i in [1, 2, 3]:
@@ -248,7 +291,10 @@ for _, row in filtered.iterrows():
         if s["headword"]:
             senses.append((i, s))
 
-    tabs = st.tabs([f"{i}" for i, _ in senses])
+    if not senses:
+        continue
+
+    tabs = st.tabs([str(i) for i, _ in senses])
 
     for tab, (i, sense) in zip(tabs, senses):
         with tab:
@@ -264,23 +310,4 @@ for _, row in filtered.iterrows():
                 meta_line.append(f"Domain: {sense['domain']}")
             if sense["register"]:
                 meta_line.append(f"Register: {sense['register']}")
-            if sense["year"]:
-                meta_line.append(f"Year(s): {sense['year']}")
-
-            if meta_line:
-                st.markdown(f'<div class="meta">{" · ".join(meta_line)}</div>', unsafe_allow_html=True)
-
-            if sense["collocates"]:
-                st.markdown(
-                    f'<div class="box"><b>Top collocates:</b> {sense["collocates"]}</div>',
-                    unsafe_allow_html=True
-                )
-
-            if sense["example"]:
-                with st.expander("Show example"):
-                    st.markdown(f'<div class="example">{sense["example"]}</div>', unsafe_allow_html=True)
-
-            st.markdown("#### Frequency")
-            plot_freq(f"Sense {i}", sense)
-
-    st.markdown("<hr style='border:1px solid #333'>", unsafe_allow_html=True)
+            if sense["]()
