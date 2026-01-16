@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from glob import glob
+import re
 
 st.set_page_config(layout="wide")
 
@@ -139,7 +140,7 @@ def render_wordlist_badges(wordlist_text):
     return badges_html
 
 # =========================
-# LOAD ALL EXCEL FILES (GitHub-safe)
+# LOAD ALL EXCEL FILES
 # =========================
 def load_all_excels():
     files = glob("*.xlsx")
@@ -164,28 +165,86 @@ if df.empty:
     st.stop()
 
 # =========================
-# STATISTICS LANDING PAGE
+# STATISTICS LANDING PAGE (SERIOUS LEXICOGRAPHIC STATS)
 # =========================
 st.markdown("<div class='block'>", unsafe_allow_html=True)
-st.markdown("<h2>Corpus Overview</h2>", unsafe_allow_html=True)
+st.markdown("<h2>Dictionary Overview</h2>", unsafe_allow_html=True)
 
-total_entries = df["general_word"].nunique()
-total_senses = sum(df[col].notna().sum() for col in df.columns if col.startswith("sense") and col.endswith("_headword"))
+stats_rows = []
 
-st.markdown(f"<div class='meta-line'><b>Total headwords:</b> {total_entries}</div>", unsafe_allow_html=True)
-st.markdown(f"<div class='meta-line'><b>Total senses:</b> {total_senses}</div>", unsafe_allow_html=True)
+# Number of entries
+num_entries = df["general_word"].nunique()
+stats_rows.append({"Metric": "Number of entries (headwords)", "Value": num_entries})
 
-# Frequency band distribution
-if "general_band" in df.columns:
-    band_counts = df["general_band"].value_counts().reset_index()
-    band_counts.columns = ["Band", "Count"]
+# Number of senses
+sense_cols = [c for c in df.columns if re.match(r"sense\d+_headword", c)]
+num_senses = sum(df[c].notna().sum() for c in sense_cols)
+stats_rows.append({"Metric": "Number of senses (total)", "Value": num_senses})
 
-    st.markdown("<div class='section-label'>Frequency Band Distribution</div>", unsafe_allow_html=True)
-    st.bar_chart(band_counts.set_index("Band"))
+# POS inventory
+pos_cols = [c for c in df.columns if re.match(r"sense\d+_pos", c)]
+pos_values = []
+for c in pos_cols:
+    pos_values.extend(df[c].dropna().astype(str).tolist())
 
-    st.markdown("<div class='section-label'>Band Table</div>", unsafe_allow_html=True)
-    st.dataframe(band_counts, use_container_width=True)
+unique_pos = sorted(set(p.strip() for p in pos_values if p.strip()))
+stats_rows.append({"Metric": "Number of POS categories", "Value": len(unique_pos)})
+stats_rows.append({"Metric": "POS tags", "Value": ", ".join(unique_pos)})
 
+# Domain inventory
+domain_cols = [c for c in df.columns if re.match(r"sense\d+_domain", c)]
+domain_values = []
+for c in domain_cols:
+    domain_values.extend(df[c].dropna().astype(str).tolist())
+unique_domains = sorted(set(d.strip() for d in domain_values if d.strip()))
+stats_rows.append({"Metric": "Domains", "Value": ", ".join(unique_domains)})
+stats_rows.append({"Metric": "Number of domains", "Value": len(unique_domains)})
+
+# Register inventory
+register_cols = [c for c in df.columns if re.match(r"sense\d+_register", c)]
+register_values = []
+for c in register_cols:
+    register_values.extend(df[c].dropna().astype(str).tolist())
+unique_registers = sorted(set(r.strip() for r in register_values if r.strip()))
+stats_rows.append({"Metric": "Registers", "Value": ", ".join(unique_registers)})
+stats_rows.append({"Metric": "Number of registers", "Value": len(unique_registers)})
+
+# Frequency bands
+band_cols = [c for c in df.columns if c.endswith("_band")]
+band_values = []
+for c in band_cols:
+    band_values.extend(df[c].dropna().astype(str).tolist())
+unique_bands = sorted(set(band_values))
+stats_rows.append({"Metric": "Frequency bands used", "Value": ", ".join(unique_bands)})
+stats_rows.append({"Metric": "Number of frequency bands", "Value": len(unique_bands)})
+
+# Pronunciation coverage
+if "general_pronunciation" in df.columns:
+    pron_general_count = df["general_pronunciation"].notna().sum()
+    stats_rows.append({"Metric": "Entries with general pronunciation", "Value": pron_general_count})
+
+sense_pron_cols = [c for c in df.columns if re.match(r"sense\d+_pronunciation", c)]
+sense_pron_count = sum(df[c].notna().sum() for c in sense_pron_cols)
+stats_rows.append({"Metric": "Senses with pronunciation", "Value": sense_pron_count})
+
+# N-gram coverage
+ngram_cols = [c for c in df.columns if c.endswith("_bigram") or c.endswith("_trigram")]
+ngram_count = sum(df[c].notna().sum() for c in ngram_cols)
+stats_rows.append({"Metric": "Entries/Senses with n-grams", "Value": ngram_count})
+
+# Collocate coverage
+collocate_cols = [c for c in df.columns if c.endswith("_typical_collocates")]
+collocate_count = sum(df[c].notna().sum() for c in collocate_cols)
+stats_rows.append({"Metric": "Senses with collocate data", "Value": collocate_count})
+
+# Example coverage
+example_cols = [c for c in df.columns if c.endswith("_example")]
+example_count = sum(df[c].notna().sum() for c in example_cols)
+stats_rows.append({"Metric": "Senses with example sentences", "Value": example_count})
+
+stats_df = pd.DataFrame(stats_rows)
+
+st.dataframe(stats_df, use_container_width=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
@@ -211,38 +270,35 @@ st.markdown("<div class='block'>", unsafe_allow_html=True)
 
 st.markdown(f"<h1>{safe(row.get('general_word')).upper()}</h1>", unsafe_allow_html=True)
 
-# ---- PRONUNCIATION (GENERAL) ----
+# Pronunciation
 if safe(row.get("general_pronunciation")):
     st.markdown(f"<div class='pron'>/{safe(row.get('general_pronunciation'))}/</div>", unsafe_allow_html=True)
 
-# ---- BADGES (CEFR / NGSL / Academic) ----
+# Wordlist badges
 badges_html = render_wordlist_badges(safe(row.get("general_wordlist")))
 if badges_html:
     st.markdown(badges_html, unsafe_allow_html=True)
 
-# ---- META ----
 st.markdown(f"<div class='meta-line'><b>Corpus:</b> {safe(row.get('general_corpus'))}</div>", unsafe_allow_html=True)
 st.markdown(f"<div class='meta-line'><b>Frequency:</b> {safe(row.get('general_frequency'))} | <b>PMW:</b> {safe(row.get('general_pmw'))}</div>", unsafe_allow_html=True)
 
-# ---- FREQUENCY BAND ----
 if safe(row.get("general_band")):
     st.markdown(f"<span class='band-badge'>Band {safe(row.get('general_band'))}</span>", unsafe_allow_html=True)
 
-# ---- GENERAL N-GRAMS ----
+# N-grams
 general_bigram = safe(row.get("general_bigram"))
 general_trigram = safe(row.get("general_trigram"))
-
 if general_bigram or general_trigram:
     st.markdown("<div class='section-label'>N-grams</div>", unsafe_allow_html=True)
     st.markdown(render_chips(general_bigram + ";" + general_trigram), unsafe_allow_html=True)
 
-# ---- LINKS ----
+# Links
 if safe(row.get("general_dictionary")):
     st.markdown(f"[Dictionary]({safe(row.get('general_dictionary'))})")
 if safe(row.get("general_thesaurus")):
     st.markdown(f"[Thesaurus]({safe(row.get('general_thesaurus'))})")
 
-# ---- RELATED ----
+# Related
 if safe(row.get("general_related_headword")):
     st.markdown(f"<div class='section-label'>Related headwords</div>{safe(row.get('general_related_headword'))}", unsafe_allow_html=True)
 if safe(row.get("general_related_regex")):
@@ -251,7 +307,7 @@ if safe(row.get("general_related_regex")):
 st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
-# SENSES – TABBED LAYOUT
+# SENSES
 # =========================
 sense_tabs = []
 sense_indices = []
@@ -273,7 +329,6 @@ if sense_tabs:
 
             st.markdown(f"<div class='sense-header'>{head} ({pos})</div>", unsafe_allow_html=True)
 
-            # ---- PRONUNCIATION (SENSE) ----
             if safe(row.get(f"sense{i}_pronunciation")):
                 st.markdown(f"<div class='pron'>/{safe(row.get(f'sense{i}_pronunciation'))}/</div>", unsafe_allow_html=True)
 
@@ -283,7 +338,6 @@ if sense_tabs:
                 unsafe_allow_html=True
             )
 
-            # ---- FREQUENCY BAND ----
             if safe(row.get(f"sense{i}_band")):
                 st.markdown(f"<span class='band-badge'>Band {safe(row.get(f'sense{i}_band'))}</span>", unsafe_allow_html=True)
 
@@ -294,22 +348,17 @@ if sense_tabs:
                 unsafe_allow_html=True
             )
 
-            # ---- SENSE N-GRAMS ----
             sense_bigram = safe(row.get(f"sense{i}_bigram"))
             sense_trigram = safe(row.get(f"sense{i}_trigram"))
-
             if sense_bigram or sense_trigram:
                 st.markdown("<div class='section-label'>N-grams</div>", unsafe_allow_html=True)
                 st.markdown(render_chips(sense_bigram + ";" + sense_trigram), unsafe_allow_html=True)
 
-            # ---- DEFINITION ----
             st.markdown(f"<div class='section-label'>Definition</div>{safe(row.get(f'sense{i}_definition'))}", unsafe_allow_html=True)
 
-            # ---- COLLOCATES ----
             if safe(row.get(f'sense{i}_typical_collocates')):
                 st.markdown(f"<div class='section-label'>Typical collocates</div>{safe(row.get(f'sense{i}_typical_collocates'))}", unsafe_allow_html=True)
 
-            # ---- EXAMPLE ----
             if safe(row.get(f'sense{i}_example')):
                 st.markdown(f"<div class='section-label'>Example</div><div class='example'>{safe(row.get(f'sense{i}_example'))}</div>", unsafe_allow_html=True)
 
