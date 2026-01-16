@@ -1,325 +1,290 @@
 import streamlit as st
 import pandas as pd
-
-st.set_page_config(page_title="Corpus Dictionary", page_icon="📘", layout="wide")
+import os
 
 # =========================
-# Cambridge-like Dark CSS
+# Config
+# =========================
+st.set_page_config(
+    page_title="Dictionary Lab",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# =========================
+# Styling (Cambridge-like)
 # =========================
 st.markdown("""
 <style>
-html, body, [class*="css"]  {
-    background-color: #0f1115;
-    color: #e6e6e6;
+body {
+    background-color: #0f1720;
+    color: #e5e7eb;
 }
-
-/* Headword */
-.headword {
-    font-size: 44px;
-    font-weight: 800;
-    color: #ffd200;
-    margin-bottom: 0px;
+.main {
+    background-color: #0f1720;
 }
-
-/* Phonetic + CEFR */
-.phonetic {
-    color: #9aa0a6;
-    font-size: 18px;
-    margin-bottom: 10px;
+h1, h2, h3, h4 {
+    color: #facc15;
 }
-
-/* Meta line */
-.meta {
-    color: #cfcfcf;
-    font-size: 15px;
-    margin-bottom: 8px;
-}
-
-/* POS tag */
-.pos {
-    color: #00e676;
-    font-weight: 600;
-}
-
-/* Definition */
-.definition {
-    font-size: 20px;
-    margin-top: 10px;
-    color: #ffffff;
-}
-
-/* Sense number */
-.sense-number {
-    color: #ffd200;
-    font-weight: 700;
-    margin-right: 6px;
-}
-
-/* Collocates */
-.collocates {
-    color: #64b5f6;
-    margin-top: 6px;
-}
-
-/* Example */
-.example {
-    font-style: italic;
-    color: #e0e0e0;
-}
-
-/* Box sections */
-.box {
-    background: #1a1d23;
-    padding: 12px;
+.sense-box {
+    background-color: #111827;
+    padding: 15px;
     border-radius: 8px;
-    margin-top: 10px;
+    margin-bottom: 15px;
+    border-left: 4px solid #facc15;
 }
-
-/* Tabs */
-.stTabs [data-baseweb="tab"] {
-    background-color: #1a1d23;
-    color: #cfcfcf;
-    border-radius: 6px 6px 0 0;
-    padding: 8px 16px;
+.label {
+    color: #9ca3af;
+    font-size: 0.85em;
 }
-
-.stTabs [aria-selected="true"] {
-    background-color: #ffd200 !important;
-    color: #000000 !important;
-    font-weight: 700;
-}
-
-/* Expander */
-.streamlit-expanderHeader {
-    background-color: #1a1d23;
-    color: #ffd200;
-    font-weight: 600;
-}
-
-/* Links */
-a {
-    color: #4fc3f7;
-    text-decoration: none;
-}
-a:hover {
-    text-decoration: underline;
-}
-
-/* Zipf bar container */
-.zipf-container {
-    background: #333;
+.badge {
+    display: inline-block;
+    background: #1f2933;
+    padding: 3px 8px;
     border-radius: 6px;
-    width: 200px;
-    height: 10px;
-    margin-top: 6px;
-    margin-bottom: 6px;
-    overflow: hidden;
+    margin-right: 6px;
+    margin-bottom: 4px;
+    font-size: 0.8em;
+    color: #e5e7eb;
 }
-
-/* Zipf bar fill */
+.badge-cefr {
+    background: #2563eb;
+}
+.badge-ngsl {
+    background: #059669;
+}
+.badge-academic {
+    background: #7c3aed;
+}
 .zipf-bar {
-    background: linear-gradient(90deg, #ffd200, #ffb300);
-    height: 100%;
+    background: #1f2933;
+    border-radius: 6px;
+    height: 10px;
+    width: 220px;
+    margin-top: 5px;
+}
+.zipf-fill {
+    background: #facc15;
+    height: 10px;
+    border-radius: 6px;
+}
+.ngram-item {
+    margin-bottom: 6px;
 }
 </style>
 """, unsafe_allow_html=True)
+
 
 # =========================
 # Helpers
 # =========================
 
-def safe(val):
-    if pd.isna(val):
-        return ""
-    return str(val)
+def load_data():
+    file_path = os.path.join(os.path.dirname(__file__), "sample_dictionary.xlsx")
+    return pd.read_excel(file_path)
 
-def load_excels(files):
-    dfs = []
-    for f in files:
-        df = pd.read_excel(f)
-        df.columns = df.columns.str.strip()
-        dfs.append(df)
-    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
-def get_sense(row, prefix):
-    return {
-        "headword": safe(row.get(f"{prefix}_headword")),
-        "pos": safe(row.get(f"{prefix}_pos")),
-        "definition": safe(row.get(f"{prefix}_definition")),
-        "collocates": safe(row.get(f"{prefix}_typical_collocates")),
-        "example": safe(row.get(f"{prefix}_example")),
-        "domain": safe(row.get(f"{prefix}_domain")),
-        "register": safe(row.get(f"{prefix}_register")),
-        "year": safe(row.get(f"{prefix}_year")),
-        "frequency": safe(row.get(f"{prefix}_frequency")),
-        "pmw": safe(row.get(f"{prefix}_pmw")),
-        "zipf": safe(row.get(f"{prefix}_zipf")),
-        "band": safe(row.get(f"{prefix}_band")),
-    }
+def zipf_to_percent(zipf):
+    try:
+        z = float(zipf)
+        return min(max(z / 7 * 100, 0), 100)  # Zipf scale 0–7
+    except:
+        return 0
 
-def render_frequency_block(sense):
-    freq = sense["frequency"]
-    pmw = sense["pmw"]
-    zipf = sense["zipf"]
 
-    parts = []
-    if freq:
-        parts.append(f"<b>Freq:</b> {freq}")
-    if pmw:
-        parts.append(f"<b>Rel:</b> {pmw} pmw")
+def render_zipf_bar(zipf_value):
+    percent = zipf_to_percent(zipf_value)
+    st.markdown(f"""
+    <div class="zipf-bar">
+        <div class="zipf-fill" style="width:{percent}%;"></div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    if parts:
-        st.markdown(" · ".join(parts), unsafe_allow_html=True)
 
-    if zipf:
-        try:
-            z = float(zipf)
-            width = min(max((z / 7) * 100, 0), 100)
-            st.markdown(f"""
-            <div style="margin-top:6px;">
-                <b>Zipf:</b> {z}
-                <div class="zipf-container">
-                    <div class="zipf-bar" style="width:{width}%"></div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        except:
-            pass
+def parse_ngrams(ngram_text):
+    """
+    Format:
+    ADJ bank = online bank ; bank NN = bank service ;
+    """
+    results = []
+    if pd.isna(ngram_text):
+        return results
 
-# =========================
-# Upload
-# =========================
+    parts = ngram_text.split(";")
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if "=" in part:
+            left, right = part.split("=", 1)
+            results.append((left.strip(), right.strip()))
+    return results
 
-uploaded = st.file_uploader(
-    "Upload Excel file(s)",
-    type=["xlsx", "xls"],
-    accept_multiple_files=True
-)
 
-if not uploaded:
-    st.info("Upload your dictionary Excel file(s) to begin.")
-    st.stop()
+def parse_wordlist_badges(wordlist_text):
+    """
+    Format:
+    NGSL=L12; CEFR=A2; academic=AC3;
+    """
+    badges = []
+    if pd.isna(wordlist_text):
+        return badges
 
-df = load_excels(uploaded)
+    parts = wordlist_text.split(";")
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if "=" in part:
+            key, value = part.split("=", 1)
+            badges.append((key.strip(), value.strip()))
+    return badges
 
-if df.empty:
-    st.warning("No data found in uploaded files.")
-    st.stop()
 
-# =========================
-# Sidebar Search
-# =========================
+def render_wordlist_badges(wordlist_text):
+    badges = parse_wordlist_badges(wordlist_text)
+    html = ""
 
-st.sidebar.header("🔍 Search")
+    for key, value in badges:
+        key_lower = key.lower()
 
-headwords = sorted(set(
-    df["sense1_headword"].dropna().astype(str).tolist() +
-    df["sense2_headword"].dropna().astype(str).tolist() +
-    df["sense3_headword"].dropna().astype(str).tolist()
-))
+        css_class = "badge"
+        if key_lower == "cefr":
+            css_class = "badge badge-cefr"
+        elif key_lower == "ngsl":
+            css_class = "badge badge-ngsl"
+        elif key_lower == "academic":
+            css_class = "badge badge-academic"
 
-selected = st.sidebar.selectbox("Headword", [""] + headwords)
-query = st.sidebar.text_input("Contains")
+        html += f"<span class='{css_class}'>{key}: {value}</span>"
 
-filtered = df.copy()
+    if html:
+        st.markdown(html, unsafe_allow_html=True)
 
-if selected:
-    filtered = filtered[
-        (filtered["sense1_headword"] == selected) |
-        (filtered["sense2_headword"] == selected) |
-        (filtered["sense3_headword"] == selected)
-    ]
-
-if query:
-    filtered = filtered[
-        filtered.apply(
-            lambda r: r.astype(str).str.contains(query, case=False, na=False).any(),
-            axis=1
-        )
-    ]
 
 # =========================
-# Render Entries
+# App
 # =========================
 
-for _, row in filtered.iterrows():
+st.title("Dictionary Lab")
 
-    main_hw = (
-        safe(row.get("sense1_headword")) or
-        safe(row.get("sense2_headword")) or
-        safe(row.get("sense3_headword"))
-    )
+data = load_data()
 
-    phonetic = "/bæŋk/"     # placeholder
-    cefr = "(CEFR: A2)"     # placeholder
+search_word = st.text_input("Search word", placeholder="e.g. bank")
 
-    general_band = safe(row.get("general_band"))
-    general_dict = safe(row.get("general_dictionary"))
-    general_thes = safe(row.get("general_thesaurus"))
-    related_hw = safe(row.get("general_related_headword"))
-    related_rx = safe(row.get("general_related_regex"))
+if search_word:
+    row = data[data["general_word"].str.lower() == search_word.lower()]
 
-    st.markdown(f'<div class="headword">{main_hw}</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="phonetic">{phonetic} {cefr}</div>', unsafe_allow_html=True)
+    if row.empty:
+        st.warning("Word not found.")
+    else:
+        row = row.iloc[0]
 
-    meta_parts = []
-    if general_band:
-        meta_parts.append(f"Band: {general_band}")
-    if general_dict:
-        meta_parts.append(f'<a href="{general_dict}" target="_blank">Cambridge</a>')
-    if general_thes:
-        meta_parts.append(f'<a href="{general_thes}" target="_blank">Collins Thesaurus</a>')
+        # =========================
+        # Header
+        # =========================
+        st.markdown(f"## {row['general_word']}")
 
-    if meta_parts:
-        st.markdown(f'<div class="meta">{" · ".join(meta_parts)}</div>', unsafe_allow_html=True)
+        # Wordlist badges (CEFR, NGSL, Academic, etc.)
+        render_wordlist_badges(row.get("general_wordlist"))
 
-    if related_hw:
-        st.markdown(f"**Related headwords:** {related_hw}")
-    if related_rx:
-        st.markdown(f"**Related regex:** {related_rx}")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown(f"<span class='label'>Corpus:</span> {row['general_corpus']}", unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"<span class='label'>Frequency:</span> {row['general_frequency']}", unsafe_allow_html=True)
+        with col3:
+            st.markdown(f"<span class='label'>PMW:</span> {row['general_pmw']}", unsafe_allow_html=True)
 
-    senses = []
-    for i in [1, 2, 3]:
-        s = get_sense(row, f"sense{i}")
-        if s["headword"]:
-            senses.append((i, s))
+        st.markdown(f"<span class='label'>Band:</span> {row['general_band']}", unsafe_allow_html=True)
+        render_zipf_bar(row["general_zipf"])
 
-    if not senses:
-        continue
+        st.markdown("---")
 
-    tabs = st.tabs([str(i) for i, _ in senses])
+        # =========================
+        # Senses (Tabs)
+        # =========================
+        sense_tabs = []
+        sense_keys = []
 
-    for tab, (i, sense) in zip(tabs, senses):
-        with tab:
-            st.markdown(
-                f'<span class="sense-number">{i}</span>'
-                f'<span class="pos">[{sense["pos"]}]</span> '
-                f'<span class="definition">{sense["definition"]}</span>',
-                unsafe_allow_html=True
-            )
+        for i in range(1, 4):
+            head = row.get(f"sense{i}_headword")
+            if pd.notna(head):
+                sense_tabs.append(f"Sense {i}")
+                sense_keys.append(i)
 
-            meta_line = []
-            if sense["domain"]:
-                meta_line.append(f"Domain: {sense['domain']}")
-            if sense["register"]:
-                meta_line.append(f"Register: {sense['register']}")
-            if sense["year"]:
-                meta_line.append(f"Year(s): {sense['year']}")
+        if sense_tabs:
+            tabs = st.tabs(sense_tabs)
 
-            if meta_line:
-                st.markdown(f'<div class="meta">{" · ".join(meta_line)}</div>', unsafe_allow_html=True)
+            for tab, i in zip(tabs, sense_keys):
+                with tab:
+                    st.markdown("<div class='sense-box'>", unsafe_allow_html=True)
 
-            if sense["collocates"]:
+                    st.markdown(
+                        f"### {row[f'sense{i}_headword']} "
+                        f"<span class='badge'>{row[f'sense{i}_pos']}</span>",
+                        unsafe_allow_html=True
+                    )
+
+                    # Definition
+                    st.markdown(f"**Definition:** {row[f'sense{i}_definition']}")
+
+                    # Frequency info
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        st.markdown(f"<span class='label'>Frequency:</span> {row[f'sense{i}_frequency']}", unsafe_allow_html=True)
+                    with c2:
+                        st.markdown(f"<span class='label'>PMW:</span> {row[f'sense{i}_pmw']}", unsafe_allow_html=True)
+                    with c3:
+                        st.markdown(f"<span class='label'>Band:</span> {row[f'sense{i}_band']}", unsafe_allow_html=True)
+
+                    render_zipf_bar(row[f"sense{i}_zipf"])
+
+                    # Example (NOT collapsible)
+                    if pd.notna(row[f"sense{i}_example"]):
+                        st.markdown(f"<span class='label'>Example:</span> {row[f'sense{i}_example']}", unsafe_allow_html=True)
+
+                    # Typical collocates
+                    if pd.notna(row[f"sense{i}_typical_collocates"]):
+                        st.markdown(f"<span class='label'>Typical collocates:</span> {row[f'sense{i}_typical_collocates']}", unsafe_allow_html=True)
+
+                    # Domain / Register / Year
+                    meta = []
+                    if pd.notna(row[f"sense{i}_domain"]):
+                        meta.append(str(row[f"sense{i}_domain"]))
+                    if pd.notna(row[f"sense{i}_register"]):
+                        meta.append(str(row[f"sense{i}_register"]))
+                    if pd.notna(row[f"sense{i}_year"]):
+                        meta.append(str(row[f"sense{i}_year"]))
+
+                    if meta:
+                        st.markdown(
+                            " ".join([f"<span class='badge'>{m}</span>" for m in meta]),
+                            unsafe_allow_html=True
+                        )
+
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+        # =========================
+        # N-GRAMS
+        # =========================
+        st.markdown("## N-grams")
+
+        ngram_text = row.get("general_n-gram_POS")
+        ngrams = parse_ngrams(ngram_text)
+
+        if ngrams:
+            for pattern, example in ngrams:
                 st.markdown(
-                    f'<div class="box"><b>Top collocates:</b> {sense["collocates"]}</div>',
+                    f"<div class='ngram-item'><span class='badge'>{pattern}</span> → {example}</div>",
                     unsafe_allow_html=True
                 )
+        else:
+            st.markdown("<span class='label'>No n-grams available.</span>", unsafe_allow_html=True)
 
-            if sense["example"]:
-                with st.expander("Show example"):
-                    st.markdown(f'<div class="example">{sense["example"]}</div>', unsafe_allow_html=True)
-
-            st.markdown("#### Frequency")
-            render_frequency_block(sense)
-
-    st.markdown("<hr style='border:1px solid #333'>", unsafe_allow_html=True)
+        # =========================
+        # Related
+        # =========================
+        if pd.notna(row.get("general_related_headword")):
+            st.markdown("## Related")
+            st.write(row["general_related_headword"])
