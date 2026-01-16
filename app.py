@@ -1,119 +1,331 @@
-# app.py
-import pandas as pd
 import streamlit as st
+import pandas as pd
+import os
 
+# =========================
 # Page config
-st.set_page_config(page_title="Excel N-gram Dashboard", layout="wide")
-st.title("📊 Excel Dashboard: Words, Senses, and N-grams")
+# =========================
+st.set_page_config(
+    page_title="Dictionary Lab",
+    layout="wide"
+)
 
-# CSS for styling
+# =========================
+# Light CSS (box-focused only)
+# =========================
 st.markdown("""
 <style>
-h3 { color: #1f77b4; }
-h4 { color: #ff7f0e; }
-table { border-collapse: collapse; width: 100%; }
-th, td { border: 1px solid #ddd; padding: 8px; }
-th { background-color: #f2f2f2; text-align: left; }
-td { background-color: #fcfcfc; }
-.code-box { background-color: #f4f4f4; border-left: 4px solid #1f77b4; padding: 10px; margin-bottom: 10px; font-family: monospace; white-space: pre-wrap; }
-.collapsible { background-color: #e7f0f7; cursor: pointer; padding: 10px; border: none; text-align: left; outline: none; font-size: 16px; width: 100%; margin-bottom: 5px; }
-.content { padding: 0 15px; display: none; overflow: hidden; background-color: #f9f9f9; margin-bottom: 10px;}
-.badge { display: inline-block; padding: 5px 10px; border-radius: 12px; color: white; margin-right: 5px; font-size: 12px; font-weight: bold;}
-.badge-cefr { background-color: #1f77b4; }
-.badge-ngsl { background-color: #2ca02c; }
-.badge-academic { background-color: #ff7f0e; }
-.badge-other { background-color: #ffdb58; color: #333; }
+
+/* Sense box */
+.sense-box {
+    background-color: #f8f9fa;
+    padding: 16px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    border-left: 5px solid #2a5db0;
+}
+
+/* Labels */
+.label {
+    color: #555;
+    font-size: 0.85em;
+    font-weight: 600;
+}
+
+/* Badges */
+.badge {
+    display: inline-block;
+    background: #e6eefc;
+    color: #1f3a8a;
+    padding: 3px 8px;
+    border-radius: 6px;
+    margin-right: 6px;
+    margin-bottom: 4px;
+    font-size: 0.8em;
+    font-weight: 600;
+}
+
+/* CEFR */
+.badge-cefr {
+    background: #2563eb;
+    color: white;
+}
+
+/* NGSL */
+.badge-ngsl {
+    background: #059669;
+    color: white;
+}
+
+/* Academic */
+.badge-academic {
+    background: #7c3aed;
+    color: white;
+}
+
+/* Zipf bar */
+.zipf-bar {
+    background: #e5e7eb;
+    border-radius: 6px;
+    height: 10px;
+    width: 220px;
+    margin-top: 4px;
+}
+
+.zipf-fill {
+    background: #facc15;
+    height: 10px;
+    border-radius: 6px;
+}
+
+/* N-gram item */
+.ngram-item {
+    background: #f1f5f9;
+    padding: 6px 10px;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    border-left: 4px solid #2a5db0;
+    font-size: 0.9em;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
-# Upload file
-st.sidebar.header("Upload Excel/CSV")
-uploaded_file = st.sidebar.file_uploader("Choose a file", type=["xlsx", "csv"])
+# =========================
+# Helpers
+# =========================
 
-if uploaded_file:
-    # Load file
-    if uploaded_file.name.endswith(".xlsx"):
-        df = pd.read_excel(uploaded_file)
+def list_excel_files():
+    base_dir = os.path.dirname(__file__)
+    files = [f for f in os.listdir(base_dir) if f.lower().endswith(".xlsx")]
+    return files
+
+
+def load_excel(filename):
+    path = os.path.join(os.path.dirname(__file__), filename)
+    return pd.read_excel(path)
+
+
+def zipf_to_percent(zipf):
+    try:
+        z = float(zipf)
+        return min(max(z / 7 * 100, 0), 100)
+    except:
+        return 0
+
+
+def render_zipf_bar(zipf_value):
+    percent = zipf_to_percent(zipf_value)
+    st.markdown(f"""
+    <div class="zipf-bar">
+        <div class="zipf-fill" style="width:{percent}%;"></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def parse_wordlist_badges(wordlist_text):
+    badges = []
+    if pd.isna(wordlist_text):
+        return badges
+
+    parts = str(wordlist_text).split(";")
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if "=" in part:
+            key, value = part.split("=", 1)
+            badges.append((key.strip(), value.strip()))
+    return badges
+
+
+def render_wordlist_badges(wordlist_text):
+    badges = parse_wordlist_badges(wordlist_text)
+    html = ""
+
+    for key, value in badges:
+        key_lower = key.lower()
+
+        css_class = "badge"
+        if key_lower == "cefr":
+            css_class = "badge badge-cefr"
+        elif key_lower == "ngsl":
+            css_class = "badge badge-ngsl"
+        elif key_lower == "academic":
+            css_class = "badge badge-academic"
+
+        html += f"<span class='{css_class}'>{key}: {value}</span>"
+
+    if html:
+        st.markdown(html, unsafe_allow_html=True)
+
+
+def parse_ngrams_structured(ngram_text):
+    """
+    Supports:
+    bigram > V see = see results ; see ADJ = see clearly ;
+    trigram > see DT NN = see the difference ;
+    """
+    if pd.isna(ngram_text):
+        return {}
+
+    result = {}
+    current_section = None
+
+    text = str(ngram_text).replace("\n", " ")
+
+    tokens = text.split(";")
+    for token in tokens:
+        token = token.strip()
+        if not token:
+            continue
+
+        if ">" in token:
+            section, rest = token.split(">", 1)
+            current_section = section.strip().lower()
+            result[current_section] = []
+            token = rest.strip()
+
+        if "=" in token and current_section:
+            left, right = token.split("=", 1)
+            result[current_section].append((left.strip(), right.strip()))
+
+    return result
+
+
+# =========================
+# App
+# =========================
+
+st.title("Dictionary Lab")
+
+excel_files = list_excel_files()
+
+if not excel_files:
+    st.error("No Excel files found in the repository folder.")
+    st.stop()
+
+selected_file = st.selectbox("Select dictionary file", excel_files)
+
+data = load_excel(selected_file)
+
+search_word = st.text_input("Search word", placeholder="e.g. saw, bank, run")
+
+if search_word:
+    row = data[data["general_word"].astype(str).str.lower() == search_word.lower()]
+
+    if row.empty:
+        st.warning("Word not found.")
     else:
-        df = pd.read_csv(uploaded_file)
+        row = row.iloc[0]
 
-    if 'general_word' not in df.columns:
-        st.error("The file must contain a 'general_word' column.")
-    else:
-        # Sidebar select
-        word_list = df['general_word'].unique()
-        selected_word = st.sidebar.selectbox("Select word", word_list)
+        # =========================
+        # Header
+        # =========================
+        st.markdown(f"## {row['general_word']}")
 
-        # Filter row
-        row = df[df['general_word'] == selected_word].iloc[0]
+        render_wordlist_badges(row.get("general_wordlist"))
 
-        # Display badges for general_wordlist
-        if 'general_wordlist' in df.columns and pd.notna(row['general_wordlist']):
-            st.markdown("### 🏷 Wordlist Badges")
-            badges = [b.strip() for b in row['general_wordlist'].split(";")]
-            badge_html = ""
-            for b in badges:
-                if b.lower().startswith("cefr"):
-                    badge_html += f"<span class='badge badge-cefr'>{b}</span>"
-                elif b.lower().startswith("ngsl"):
-                    badge_html += f"<span class='badge badge-ngsl'>{b}</span>"
-                elif b.lower().startswith("academic"):
-                    badge_html += f"<span class='badge badge-academic'>{b}</span>"
-                else:
-                    badge_html += f"<span class='badge badge-other'>{b}</span>"
-            st.markdown(badge_html, unsafe_allow_html=True)
-
-        # Create 3-column layout
         col1, col2, col3 = st.columns(3)
-
-        # --- Column 1: General metadata ---
         with col1:
-            st.subheader("📁 General Metadata")
-            general_cols = [c for c in df.columns if c.startswith('general_') and c != 'general_wordlist']
-            general_data = row[general_cols].to_frame().rename(columns={selected_word: "Value"})
-            st.table(general_data)
-
-        # --- Column 2: Senses ---
+            st.markdown(f"<span class='label'>Corpus:</span> {row.get('general_corpus','')}", unsafe_allow_html=True)
         with col2:
-            st.subheader("🧩 Senses")
-            for i in range(1, 4):
-                sense_head = f'sense{i}_headword'
-                if sense_head in df.columns and pd.notna(row[sense_head]):
-                    st.markdown(f"<button class='collapsible'>Sense {i}: {row[sense_head]} ({row.get(f'sense{i}_pos', '')})</button>", unsafe_allow_html=True)
-                    sense_cols = [c for c in df.columns if c.startswith(f'sense{i}_')]
-                    sense_data = row[sense_cols].to_frame().rename(columns={selected_word: "Value"})
-                    st.markdown(f"<div class='content'>{sense_data.to_html(classes='table', header=True, index=True)}</div>", unsafe_allow_html=True)
-
-        # --- Column 3: N-grams ---
+            st.markdown(f"<span class='label'>Frequency:</span> {row.get('general_frequency','')}", unsafe_allow_html=True)
         with col3:
-            st.subheader("🔗 N-gram Patterns")
-            if 'general_n-gram_POS' in df.columns and pd.notna(row['general_n-gram_POS']):
-                ngram_lines = [line.strip() for line in row['general_n-gram_POS'].split("\n") if line.strip()]
-                for line in ngram_lines:
-                    if line.lower().startswith("bigram"):
-                        st.markdown(f"<div class='code-box'><strong>Bigram:</strong> {line[len('bigram >'):].strip()}</div>", unsafe_allow_html=True)
-                    elif line.lower().startswith("trigram"):
-                        st.markdown(f"<div class='code-box'><strong>Trigram:</strong> {line[len('trigram >'):].strip()}</div>", unsafe_allow_html=True)
-                    else:
-                        st.markdown(f"<div class='code-box'>{line}</div>", unsafe_allow_html=True)
+            st.markdown(f"<span class='label'>PMW:</span> {row.get('general_pmw','')}", unsafe_allow_html=True)
 
-        # --- JS for collapsible sections ---
-        st.markdown("""
-        <script>
-        var coll = document.getElementsByClassName("collapsible");
-        for (var i = 0; i < coll.length; i++) {
-          coll[i].addEventListener("click", function() {
-            this.classList.toggle("active");
-            var content = this.nextElementSibling;
-            if (content.style.display === "block") {
-              content.style.display = "none";
-            } else {
-              content.style.display = "block";
-            }
-          });
-        }
-        </script>
-        """, unsafe_allow_html=True)
+        st.markdown(f"<span class='label'>Band:</span> {row.get('general_band','')}", unsafe_allow_html=True)
+        render_zipf_bar(row.get("general_zipf"))
 
-else:
-    st.info("Upload an Excel or CSV file to visualise its contents.")
+        st.markdown("---")
+
+        # =========================
+        # Senses (Tabs)
+        # =========================
+        sense_tabs = []
+        sense_keys = []
+
+        for i in range(1, 4):
+            head = row.get(f"sense{i}_headword")
+            if pd.notna(head):
+                sense_tabs.append(f"Sense {i}")
+                sense_keys.append(i)
+
+        if sense_tabs:
+            tabs = st.tabs(sense_tabs)
+
+            for tab, i in zip(tabs, sense_keys):
+                with tab:
+                    st.markdown("<div class='sense-box'>", unsafe_allow_html=True)
+
+                    st.markdown(
+                        f"### {row.get(f'sense{i}_headword','')} "
+                        f"<span class='badge'>{row.get(f'sense{i}_pos','')}</span>",
+                        unsafe_allow_html=True
+                    )
+
+                    # Definition
+                    st.markdown(f"**Definition:** {row.get(f'sense{i}_definition','')}")
+
+                    # Frequency info
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        st.markdown(f"<span class='label'>Frequency:</span> {row.get(f'sense{i}_frequency','')}", unsafe_allow_html=True)
+                    with c2:
+                        st.markdown(f"<span class='label'>PMW:</span> {row.get(f'sense{i}_pmw','')}", unsafe_allow_html=True)
+                    with c3:
+                        st.markdown(f"<span class='label'>Band:</span> {row.get(f'sense{i}_band','')}", unsafe_allow_html=True)
+
+                    render_zipf_bar(row.get(f"sense{i}_zipf"))
+
+                    # Example (not collapsible)
+                    if pd.notna(row.get(f"sense{i}_example")):
+                        st.markdown(f"<span class='label'>Example:</span> {row.get(f'sense{i}_example')}", unsafe_allow_html=True)
+
+                    # Typical collocates
+                    if pd.notna(row.get(f"sense{i}_typical_collocates")):
+                        st.markdown(f"<span class='label'>Typical collocates:</span> {row.get(f'sense{i}_typical_collocates')}", unsafe_allow_html=True)
+
+                    # Domain / Register / Year
+                    meta = []
+                    if pd.notna(row.get(f"sense{i}_domain")):
+                        meta.append(str(row.get(f"sense{i}_domain")))
+                    if pd.notna(row.get(f"sense{i}_register")):
+                        meta.append(str(row.get(f"sense{i}_register")))
+                    if pd.notna(row.get(f"sense{i}_year")):
+                        meta.append(str(row.get(f"sense{i}_year")))
+
+                    if meta:
+                        st.markdown(
+                            " ".join([f"<span class='badge'>{m}</span>" for m in meta]),
+                            unsafe_allow_html=True
+                        )
+
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+        # =========================
+        # N-GRAMS
+        # =========================
+        st.markdown("## N-grams")
+
+        ngram_text = row.get("general_n-gram_POS")
+        ngram_groups = parse_ngrams_structured(ngram_text)
+
+        if ngram_groups:
+            for section, pairs in ngram_groups.items():
+                st.markdown(f"### {section.capitalize()}")
+
+                for pattern, example in pairs:
+                    st.markdown(
+                        f"<div class='ngram-item'><span class='badge'>{pattern}</span> → {example}</div>",
+                        unsafe_allow_html=True
+                    )
+        else:
+            st.markdown("<span class='label'>No n-grams available.</span>", unsafe_allow_html=True)
+
+        # =========================
+        # Related
+        # =========================
+        if pd.notna(row.get("general_related_headword")):
+            st.markdown("## Related headwords")
+            st.write(row.get("general_related_headword"))
