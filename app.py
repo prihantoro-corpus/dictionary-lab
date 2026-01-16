@@ -49,6 +49,17 @@ h3 { font-size: 22px; margin-bottom: 4px; }
 .badge-ngsl { background-color: #2f8f2f; }
 .badge-academic { background-color: #8b5cf6; }
 
+.band-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    margin-right: 6px;
+    border-radius: 14px;
+    background-color: #f4c430;
+    color: #000000;
+    font-size: 12px;
+    font-weight: 600;
+}
+
 .chip {
     display: inline-block;
     padding: 5px 12px;
@@ -65,13 +76,6 @@ h3 { font-size: 22px; margin-bottom: 4px; }
     color: #e6e6e6;
     margin-top: 14px;
     margin-bottom: 6px;
-}
-
-.zipf-bar {
-    height: 8px;
-    background-color: #f4c430;
-    border-radius: 4px;
-    margin: 6px 0 10px 0;
 }
 
 a { color: #5da9ff; text-decoration: none; }
@@ -94,6 +98,12 @@ a:hover { text-decoration: underline; }
     font-style: italic;
     margin-top: 6px;
 }
+
+.pron {
+    font-size: 18px;
+    color: #b6e3ff;
+    margin-bottom: 6px;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -110,14 +120,6 @@ def render_chips(text):
         return ""
     parts = [p.strip() for p in str(text).split(";") if p.strip()]
     return "".join([f"<span class='chip'>{p}</span>" for p in parts])
-
-def zipf_bar(val):
-    try:
-        v = float(val)
-        width = min((v / 7.0) * 100, 100)
-        return f"<div class='zipf-bar' style='width:{width}%'></div>"
-    except:
-        return ""
 
 def render_wordlist_badges(wordlist_text):
     if not wordlist_text:
@@ -162,6 +164,31 @@ if df.empty:
     st.stop()
 
 # =========================
+# STATISTICS LANDING PAGE
+# =========================
+st.markdown("<div class='block'>", unsafe_allow_html=True)
+st.markdown("<h2>Corpus Overview</h2>", unsafe_allow_html=True)
+
+total_entries = df["general_word"].nunique()
+total_senses = sum(df[col].notna().sum() for col in df.columns if col.startswith("sense") and col.endswith("_headword"))
+
+st.markdown(f"<div class='meta-line'><b>Total headwords:</b> {total_entries}</div>", unsafe_allow_html=True)
+st.markdown(f"<div class='meta-line'><b>Total senses:</b> {total_senses}</div>", unsafe_allow_html=True)
+
+# Frequency band distribution
+if "general_band" in df.columns:
+    band_counts = df["general_band"].value_counts().reset_index()
+    band_counts.columns = ["Band", "Count"]
+
+    st.markdown("<div class='section-label'>Frequency Band Distribution</div>", unsafe_allow_html=True)
+    st.bar_chart(band_counts.set_index("Band"))
+
+    st.markdown("<div class='section-label'>Band Table</div>", unsafe_allow_html=True)
+    st.dataframe(band_counts, use_container_width=True)
+
+st.markdown("</div>", unsafe_allow_html=True)
+
+# =========================
 # SEARCH
 # =========================
 query = st.text_input("Search headword", placeholder="e.g. bank, run, saw")
@@ -184,16 +211,22 @@ st.markdown("<div class='block'>", unsafe_allow_html=True)
 
 st.markdown(f"<h1>{safe(row.get('general_word')).upper()}</h1>", unsafe_allow_html=True)
 
+# ---- PRONUNCIATION (GENERAL) ----
+if safe(row.get("general_pronunciation")):
+    st.markdown(f"<div class='pron'>/{safe(row.get('general_pronunciation'))}/</div>", unsafe_allow_html=True)
+
 # ---- BADGES (CEFR / NGSL / Academic) ----
 badges_html = render_wordlist_badges(safe(row.get("general_wordlist")))
 if badges_html:
     st.markdown(badges_html, unsafe_allow_html=True)
 
+# ---- META ----
 st.markdown(f"<div class='meta-line'><b>Corpus:</b> {safe(row.get('general_corpus'))}</div>", unsafe_allow_html=True)
 st.markdown(f"<div class='meta-line'><b>Frequency:</b> {safe(row.get('general_frequency'))} | <b>PMW:</b> {safe(row.get('general_pmw'))}</div>", unsafe_allow_html=True)
-st.markdown(f"<div class='meta-line'><b>Zipf:</b> {safe(row.get('general_zipf'))} | <b>Band:</b> {safe(row.get('general_band'))}</div>", unsafe_allow_html=True)
 
-st.markdown(zipf_bar(row.get("general_zipf")), unsafe_allow_html=True)
+# ---- FREQUENCY BAND ----
+if safe(row.get("general_band")):
+    st.markdown(f"<span class='band-badge'>Band {safe(row.get('general_band'))}</span>", unsafe_allow_html=True)
 
 # ---- GENERAL N-GRAMS ----
 general_bigram = safe(row.get("general_bigram"))
@@ -240,15 +273,19 @@ if sense_tabs:
 
             st.markdown(f"<div class='sense-header'>{head} ({pos})</div>", unsafe_allow_html=True)
 
+            # ---- PRONUNCIATION (SENSE) ----
+            if safe(row.get(f"sense{i}_pronunciation")):
+                st.markdown(f"<div class='pron'>/{safe(row.get(f'sense{i}_pronunciation'))}/</div>", unsafe_allow_html=True)
+
             st.markdown(
                 f"<div class='sense-meta'><b>Frequency:</b> {safe(row.get(f'sense{i}_frequency'))} | "
-                f"<b>PMW:</b> {safe(row.get(f'sense{i}_pmw'))} | "
-                f"<b>Zipf:</b> {safe(row.get(f'sense{i}_zipf'))} | "
-                f"<b>Band:</b> {safe(row.get(f'sense{i}_band'))}</div>",
+                f"<b>PMW:</b> {safe(row.get(f'sense{i}_pmw'))}</div>",
                 unsafe_allow_html=True
             )
 
-            st.markdown(zipf_bar(row.get(f"sense{i}_zipf")), unsafe_allow_html=True)
+            # ---- FREQUENCY BAND ----
+            if safe(row.get(f"sense{i}_band")):
+                st.markdown(f"<span class='band-badge'>Band {safe(row.get(f'sense{i}_band'))}</span>", unsafe_allow_html=True)
 
             st.markdown(
                 f"<div class='sense-meta'><b>Domain:</b> {safe(row.get(f'sense{i}_domain'))} | "
