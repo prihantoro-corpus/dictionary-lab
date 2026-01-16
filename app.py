@@ -1,336 +1,185 @@
-# app.py
-# CORTEX DICTIONARY LAB – TreeTagger + inline XML prototype
-
 import streamlit as st
 import pandas as pd
-import numpy as np
-import re
-import math
-import random
-from collections import Counter, defaultdict
 
-st.set_page_config(page_title="CORTEX DICTIONARY LAB", layout="wide")
-st.title("🧠 CORTEX DICTIONARY LAB – TreeTagger + Inline XML")
+st.set_page_config(
+    page_title="Corpus Dictionary Viewer",
+    page_icon="📘",
+    layout="wide"
+)
 
-PUNCTUATION = set(list(".,!?;:()[]{}\"'—–-…"))
+st.title("📘 Corpus-Based Dictionary Viewer")
+st.markdown("Upload one or more Excel files and browse them in a dictionary-style view.")
 
-# =========================================================
-# Utilities
-# =========================================================
+# -----------------------------
+# Helper functions
+# -----------------------------
 
-def pmw_to_zipf(pmw):
-    if pmw <= 0:
-        return None
-    return round(math.log10(pmw) + 3, 2)
+def load_excels(uploaded_files):
+    dfs = []
+    for file in uploaded_files:
+        df = pd.read_excel(file)
+        df.columns = df.columns.str.strip()
+        dfs.append(df)
+    if dfs:
+        return pd.concat(dfs, ignore_index=True)
+    return pd.DataFrame()
 
-def zipf_to_band(zipf):
-    if zipf is None:
-        return None
-    if zipf >= 7: return 1
-    if zipf >= 6: return 2
-    if zipf >= 5: return 3
-    if zipf >= 4: return 4
-    return 5
+def safe(val):
+    """Return empty string if NaN, else string."""
+    if pd.isna(val):
+        return ""
+    return str(val)
 
-def build_dictionary_link(word, lang):
-    if lang == "EN":
-        return f"https://www.collinsdictionary.com/dictionary/english/{word}"
-    elif lang == "ID":
-        return f"https://kbbi.kemdikbud.go.id/entri/{word}"
-    return "NA"
+def render_sense(row, sense_prefix):
+    headword = safe(row.get(f"{sense_prefix}_headword"))
+    if not headword:
+        return  # no such sense, skip
 
-def build_thesaurus_link(word, lang):
-    if lang == "EN":
-        return f"https://www.collinsdictionary.com/dictionary/english-thesaurus/{word}"
-    elif lang == "ID":
-        return f"https://tesaurus.kemendikdasmen.go.id/tematis/lema/{word}"
-    return "NA"
+    pos = safe(row.get(f"{sense_prefix}_pos"))
+    definition = safe(row.get(f"{sense_prefix}_definition"))
+    collocates = safe(row.get(f"{sense_prefix}_typical_collocates"))
+    example = safe(row.get(f"{sense_prefix}_example"))
+    domain = safe(row.get(f"{sense_prefix}_domain"))
+    register = safe(row.get(f"{sense_prefix}_register"))
+    year = safe(row.get(f"{sense_prefix}_year"))
+    freq = safe(row.get(f"{sense_prefix}_frequency"))
+    pmw = safe(row.get(f"{sense_prefix}_pmw"))
+    zipf = safe(row.get(f"{sense_prefix}_zipf"))
+    band = safe(row.get(f"{sense_prefix}_band"))
 
-# =========================================================
-# CORE: TreeTagger + Inline XML Parser (THIS IS THE KEY)
-# =========================================================
+    st.markdown(f"**{headword}** *{pos}*")
+    if definition:
+        st.markdown(f"> {definition}")
 
-def parse_treetagger_with_inline_xml(file):
-    rows = []
-    active_attrs = {}   # e.g. {"domain": "spoken", "year": "2013"}
+    meta_parts = []
+    if domain:
+        meta_parts.append(f"**Domain:** {domain}")
+    if register:
+        meta_parts.append(f"**Register:** {register}")
+    if year:
+        meta_parts.append(f"**Year(s):** {year}")
 
-    content = file.read().decode("utf-8", errors="ignore")
-    lines = content.splitlines()
+    if meta_parts:
+        st.markdown(" · ".join(meta_parts))
 
-    sent_id = 0
+    if collocates:
+        st.markdown(f"**Typical collocates:** {collocates}")
 
-    for line in lines:
-        line = line.strip()
+    if example:
+        st.markdown(f"_Example:_ {example}")
 
-        if not line:
-            continue
+    freq_parts = []
+    if freq:
+        freq_parts.append(f"Freq: {freq}")
+    if pmw:
+        freq_parts.append(f"PMW: {pmw}")
+    if zipf:
+        freq_parts.append(f"Zipf: {zipf}")
+    if band:
+        freq_parts.append(f"Band: {band}")
 
-        # -----------------------------------------
-        # Opening tag: <domain=spoken>, <year=2013>
-        # -----------------------------------------
-        if line.startswith("<") and line.endswith(">") and not line.startswith("</"):
-            inner = line[1:-1].strip()
-            if "=" in inner:
-                k, v = inner.split("=", 1)
-                active_attrs[k.strip()] = v.strip()
-            continue
+    if freq_parts:
+        st.markdown(" | ".join(freq_parts))
 
-        # -----------------------------------------
-        # Closing tag: </domain>
-        # -----------------------------------------
-        if line.startswith("</") and line.endswith(">"):
-            tag = line[2:-1].strip()
-            if tag in active_attrs:
-                del active_attrs[tag]
-            continue
+    st.markdown("---")
 
-        # -----------------------------------------
-        # TreeTagger token line: token \t POS \t lemma
-        # -----------------------------------------
-        parts = line.split("\t")
-        if len(parts) < 3:
-            continue
 
-        token = parts[0].strip()
-        pos = parts[1].strip()
-        lemma = parts[2].strip()
+# -----------------------------
+# Upload section
+# -----------------------------
 
-        sent_id += 1
+uploaded_files = st.file_uploader(
+    "Upload Excel file(s)",
+    type=["xlsx", "xls"],
+    accept_multiple_files=True
+)
 
-        row = {
-            "token": token,
-            "pos": pos,
-            "lemma": lemma,
-            "sent_id": sent_id
-        }
+if not uploaded_files:
+    st.info("Please upload one or more Excel files to begin.")
+    st.stop()
 
-        # attach active XML attributes
-        for k, v in active_attrs.items():
-            row[k] = v
+df = load_excels(uploaded_files)
 
-        rows.append(row)
+if df.empty:
+    st.warning("No data found in uploaded files.")
+    st.stop()
 
-    df = pd.DataFrame(rows)
-    return df
+# -----------------------------
+# Sidebar filters
+# -----------------------------
 
-# =========================================================
-# N-grams
-# =========================================================
+st.sidebar.header("🔍 Filters")
 
-def compute_ngrams(tokens, target):
-    tokens = [t for t in tokens if t not in PUNCTUATION]
-    bigrams = Counter()
-    trigrams = Counter()
-
-    for i in range(len(tokens) - 1):
-        bigrams[(tokens[i], tokens[i+1])] += 1
-
-    for i in range(len(tokens) - 2):
-        trigrams[(tokens[i], tokens[i+1], tokens[i+2])] += 1
-
-    wc = {bg: c for bg, c in bigrams.items() if bg[0].lower() == target.lower()}
-    cw = {bg: c for bg, c in bigrams.items() if bg[1].lower() == target.lower()}
-
-    wcc = {tg: c for tg, c in trigrams.items() if tg[0].lower() == target.lower()}
-    cwc = {tg: c for tg, c in trigrams.items() if tg[1].lower() == target.lower()}
-    ccw = {tg: c for tg, c in trigrams.items() if tg[2].lower() == target.lower()}
-
-    result = []
-    result += [" ".join(bg) for bg, _ in sorted(wc.items(), key=lambda x: x[1], reverse=True)[:2]]
-    result += [" ".join(bg) for bg, _ in sorted(cw.items(), key=lambda x: x[1], reverse=True)[:2]]
-    result += [" ".join(tg) for tg, _ in sorted(wcc.items(), key=lambda x: x[1], reverse=True)[:1]]
-    result += [" ".join(tg) for tg, _ in sorted(cwc.items(), key=lambda x: x[1], reverse=True)[:1]]
-    result += [" ".join(tg) for tg, _ in sorted(ccw.items(), key=lambda x: x[1], reverse=True)[:1]]
-
-    return result
-
-# =========================================================
-# Collocates (PER SENSE)
-# =========================================================
-
-def compute_collocates(df, target, window=5):
-    coll = Counter()
-    tokens = df["token"].tolist()
-
-    for i, t in enumerate(tokens):
-        if t.lower() == target.lower():
-            start = max(0, i - window)
-            end = min(len(tokens), i + window + 1)
-            for j in range(start, end):
-                if j != i:
-                    candidate = tokens[j].lower()
-                    if candidate not in PUNCTUATION and candidate != target.lower():
-                        coll[candidate] += 1
-
-    return coll.most_common(20)
-
-# =========================================================
-# KWIC (PER SENSE)
-# =========================================================
-
-def generate_kwic(df, target, max_examples=3):
-    rows = []
-    grouped = df.groupby("sent_id")
-
-    for _, group in grouped:
-        tokens = group["token"].tolist()
-        lowered = [t.lower() for t in tokens]
-
-        if target.lower() in lowered:
-            idxs = [i for i, t in enumerate(lowered) if t == target.lower()]
-            for idx in idxs:
-                left = " ".join(tokens[max(0, idx-7):idx])
-                node = tokens[idx]
-                right = " ".join(tokens[idx+1:idx+8])
-                rows.append((left, node, right))
-
-    random.shuffle(rows)
-    return rows[:max_examples]
-
-# =========================================================
-# Session state
-# =========================================================
-
-if "corpora" not in st.session_state:
-    st.session_state["corpora"] = {}
-
-# =========================================================
-# UI – Data-driven only (corpus)
-# =========================================================
-
-st.subheader("📚 Corpus Manager")
-
-new_corpus = st.text_input("New corpus name")
-if st.button("Add corpus"):
-    if new_corpus:
-        st.session_state["corpora"][new_corpus] = []
-        st.success(f"Corpus '{new_corpus}' added.")
-
-corpus_names = list(st.session_state["corpora"].keys())
-
-if corpus_names:
-    selected_corpus = st.selectbox("Select corpus", corpus_names)
-
-    uploaded_files = st.file_uploader(
-        "Upload TreeTagger corpus files (with inline XML)",
-        type=["txt", "xml"],
-        accept_multiple_files=True
+headwords = sorted(
+    set(
+        df["sense1_headword"].dropna().astype(str).tolist() +
+        df["sense2_headword"].dropna().astype(str).tolist() +
+        df["sense3_headword"].dropna().astype(str).tolist()
     )
+)
 
-    if uploaded_files:
-        for f in uploaded_files:
-            df = parse_treetagger_with_inline_xml(f)
-            df["corpus"] = selected_corpus
-            st.session_state["corpora"][selected_corpus].append(df)
+selected_headword = st.sidebar.selectbox("Select headword", [""] + headwords)
 
-        st.success("Files added to corpus.")
+search_query = st.sidebar.text_input("Search (contains)")
 
-# =========================================================
-# Query
-# =========================================================
+# -----------------------------
+# Main display
+# -----------------------------
 
-st.subheader("🔎 Dictionary Query")
-query_word = st.text_input("Enter word")
+filtered_df = df.copy()
 
-if query_word:
-    all_dfs = []
-    for c, dfs in st.session_state["corpora"].items():
-        for d in dfs:
-            all_dfs.append(d)
+if selected_headword:
+    mask = (
+        (filtered_df["sense1_headword"] == selected_headword) |
+        (filtered_df["sense2_headword"] == selected_headword) |
+        (filtered_df["sense3_headword"] == selected_headword)
+    )
+    filtered_df = filtered_df[mask]
 
-    if not all_dfs:
-        st.warning("No data.")
-    else:
-        full_df = pd.concat(all_dfs, ignore_index=True)
+if search_query:
+    filtered_df = filtered_df[
+        filtered_df.apply(
+            lambda row: row.astype(str).str.contains(search_query, case=False, na=False).any(),
+            axis=1
+        )
+    ]
 
-        total_tokens = len(full_df)
-        freq = (full_df["token"].str.lower() == query_word.lower()).sum()
-        pmw = (freq / total_tokens) * 1_000_000 if total_tokens > 0 else 0
-        zipf = pmw_to_zipf(pmw)
-        band = zipf_to_band(zipf)
+st.markdown(f"### Showing {len(filtered_df)} entry(ies)")
 
-        corpora_used = ", ".join(sorted(full_df[full_df["token"].str.lower() == query_word.lower()]["corpus"].unique()))
+# -----------------------------
+# Dictionary-style rendering
+# -----------------------------
 
-        related_head = sorted(set(full_df[full_df["lemma"].str.lower() == query_word.lower()]["token"]))
-        related_regex = sorted(set(full_df[full_df["token"].str.contains(query_word, case=False)]["token"]))
+for idx, row in filtered_df.iterrows():
+    general_band = safe(row.get("general_band"))
+    general_dict = safe(row.get("general_dictionary"))
+    general_thes = safe(row.get("general_thesaurus"))
+    related_hw = safe(row.get("general_related_headword"))
+    related_rx = safe(row.get("general_related_regex"))
 
-        lang = st.selectbox("Language", ["EN", "ID", "OTHER"])
+    st.markdown("## " + (safe(row.get("sense1_headword")) or safe(row.get("sense2_headword")) or safe(row.get("sense3_headword"))))
 
-        st.markdown("## General")
-        gen_cols = st.columns(4)
-        gen_cols[0].metric("Frequency", freq)
-        gen_cols[1].metric("PMW", round(pmw, 2))
-        gen_cols[2].metric("Zipf", zipf if zipf else "NA")
-        gen_cols[3].metric("Band", band if band else "NA")
+    meta = []
+    if general_band:
+        meta.append(f"**Band:** {general_band}")
+    if general_dict:
+        meta.append(f"[Dictionary]({general_dict})")
+    if general_thes:
+        meta.append(f"[Thesaurus]({general_thes})")
 
-        st.write(f"**Corpus:** {corpora_used if corpora_used else 'NA'}")
-        st.write(f"**Related words (headword):** {', '.join(related_head) if related_head else 'NA'}")
-        st.write(f"**Related words (regex):** {', '.join(related_regex) if related_regex else 'NA'}")
+    if meta:
+        st.markdown(" · ".join(meta))
 
-        st.write(f"**Dictionary:** {build_dictionary_link(query_word, lang)}")
-        st.write(f"**Thesaurus:** {build_thesaurus_link(query_word, lang)}")
+    if related_hw:
+        st.markdown(f"**Related headwords:** {related_hw}")
+    if related_rx:
+        st.markdown(f"**Related regex:** {related_rx}")
 
-        tokens_all = full_df["token"].tolist()
-        ngrams = compute_ngrams(tokens_all, query_word)
-        st.write(f"**N-grams:** {', '.join(ngrams) if ngrams else 'NA'}")
+    st.markdown("---")
 
-        # =================================================
-        # SENSES = POS-BASED
-        # =================================================
+    # Render senses
+    render_sense(row, "sense1")
+    render_sense(row, "sense2")
+    render_sense(row, "sense3")
 
-        pos_tags = full_df[full_df["token"].str.lower() == query_word.lower()]["pos"].unique()
-        if len(pos_tags) == 0:
-            pos_tags = ["NA"]
-
-        for i, pos in enumerate(pos_tags, start=1):
-            st.markdown(f"## Sense {i} ({pos})")
-
-            sense_df = full_df[(full_df["token"].str.lower() == query_word.lower()) & (full_df["pos"] == pos)]
-            sense_context_df = full_df[full_df["pos"] == pos]
-
-            sfreq = len(sense_df)
-            spmw = (sfreq / total_tokens) * 1_000_000 if total_tokens > 0 else 0
-            szipf = pmw_to_zipf(spmw)
-            sband = zipf_to_band(szipf)
-
-            cols = st.columns(4)
-            cols[0].metric("Frequency", sfreq)
-            cols[1].metric("PMW", round(spmw, 2))
-            cols[2].metric("Zipf", szipf if szipf else "NA")
-            cols[3].metric("Band", sband if sband else "NA")
-
-            lemma_vals = sense_df["lemma"].unique()
-            lemma = lemma_vals[0] if len(lemma_vals) > 0 else "NA"
-            st.write(f"**Headword (lemma):** {lemma}")
-            st.write(f"**POS:** {pos}")
-
-            # -----------------------------
-            # Collocates (per sense)
-            # -----------------------------
-            coll = compute_collocates(sense_context_df, query_word)
-            with st.expander("Typical collocates (top 20) – per sense"):
-                if coll:
-                    for w, c in coll:
-                        st.write(f"{w} ({c})")
-                else:
-                    st.write("NA")
-
-            # -----------------------------
-            # KWIC (per sense)
-            # -----------------------------
-            kwic = generate_kwic(sense_context_df, query_word, max_examples=3)
-            st.markdown("**Examples (KWIC – per sense):**")
-            if kwic:
-                for left, node, right in kwic:
-                    st.markdown(f"{left} **{node}** {right}")
-            else:
-                st.write("NA")
-
-            # -----------------------------
-            # ATTRIBUTES (domain, year, etc.)
-            # -----------------------------
-            attr_cols = [c for c in sense_df.columns if c not in ["token", "pos", "lemma", "sent_id", "corpus"]]
-            for ac in attr_cols:
-                vals = sense_df[ac].dropna().unique()
-                if len(vals) > 0:
-                    st.write(f"**{ac}:** {', '.join(vals)}")
+    st.markdown("----")
