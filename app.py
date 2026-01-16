@@ -124,7 +124,6 @@ a:hover {
 </style>
 """, unsafe_allow_html=True)
 
-
 # =========================
 # Helpers
 # =========================
@@ -172,7 +171,6 @@ def render_frequency_block(sense):
     if parts:
         st.markdown(" · ".join(parts), unsafe_allow_html=True)
 
-    # Zipf bar (1–7 scale assumed)
     if zipf:
         try:
             z = float(zipf)
@@ -187,7 +185,6 @@ def render_frequency_block(sense):
             """, unsafe_allow_html=True)
         except:
             pass
-
 
 # =========================
 # Upload
@@ -208,7 +205,6 @@ df = load_excels(uploaded)
 if df.empty:
     st.warning("No data found in uploaded files.")
     st.stop()
-
 
 # =========================
 # Sidebar Search
@@ -242,7 +238,6 @@ if query:
         )
     ]
 
-
 # =========================
 # Render Entries
 # =========================
@@ -255,7 +250,6 @@ for _, row in filtered.iterrows():
         safe(row.get("sense3_headword"))
     )
 
-    # Optional: later you can add columns for these
     phonetic = "/bæŋk/"     # placeholder
     cefr = "(CEFR: A2)"     # placeholder
 
@@ -284,7 +278,6 @@ for _, row in filtered.iterrows():
     if related_rx:
         st.markdown(f"**Related regex:** {related_rx}")
 
-    # Collect senses
     senses = []
     for i in [1, 2, 3]:
         s = get_sense(row, f"sense{i}")
@@ -310,4 +303,23 @@ for _, row in filtered.iterrows():
                 meta_line.append(f"Domain: {sense['domain']}")
             if sense["register"]:
                 meta_line.append(f"Register: {sense['register']}")
-            if sense["]()
+            if sense["year"]:
+                meta_line.append(f"Year(s): {sense['year']}")
+
+            if meta_line:
+                st.markdown(f'<div class="meta">{" · ".join(meta_line)}</div>', unsafe_allow_html=True)
+
+            if sense["collocates"]:
+                st.markdown(
+                    f'<div class="box"><b>Top collocates:</b> {sense["collocates"]}</div>',
+                    unsafe_allow_html=True
+                )
+
+            if sense["example"]:
+                with st.expander("Show example"):
+                    st.markdown(f'<div class="example">{sense["example"]}</div>', unsafe_allow_html=True)
+
+            st.markdown("#### Frequency")
+            render_frequency_block(sense)
+
+    st.markdown("<hr style='border:1px solid #333'>", unsafe_allow_html=True)
