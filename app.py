@@ -1,20 +1,14 @@
 import streamlit as st
 import pandas as pd
 
-# =========================
-# Page config
-# =========================
 st.set_page_config(page_title="Lexical Entry Viewer", layout="wide")
 
 # =========================
-# STRONG CSS (force visible)
+# CSS – dark, visible
 # =========================
 st.markdown("""
 <style>
-body {
-    background-color: #0f172a;
-    color: #e5e7eb;
-}
+body { background-color: #0f172a; color: #e5e7eb; }
 
 .section-box {
     border: 1px solid #334155;
@@ -31,16 +25,9 @@ body {
     color: #f8fafc;
 }
 
-.meta-line {
-    font-size: 0.95rem;
-    margin-bottom: 4px;
-    color: #e5e7eb;
-}
+.meta-line { font-size: 0.95rem; margin-bottom: 4px; color: #e5e7eb; }
 
-.label {
-    font-weight: 600;
-    color: #38bdf8;
-}
+.label { font-weight: 600; color: #38bdf8; }
 
 .chip-container {
     display: flex;
@@ -66,13 +53,15 @@ body {
 # Helpers
 # =========================
 def safe(row, col):
-    if col in row and pd.notna(row[col]):
+    col = col.strip()
+    if col in row.index and pd.notna(row[col]):
         return str(row[col]).strip()
     return ""
 
 def render_chips(text):
     if not text:
         return ""
+    text = text.replace("\n", " ").replace("\\", " ")
     parts = [p.strip() for p in text.replace(",", ";").split(";") if p.strip()]
     if not parts:
         return ""
@@ -93,6 +82,12 @@ if not uploaded:
     st.stop()
 
 df = pd.read_excel(uploaded)
+
+# 🔴 CRITICAL FIX: normalize column names
+df.columns = [c.strip().replace("\n", "").replace("\r", "") for c in df.columns]
+
+# Debug (can comment later)
+# st.sidebar.write("Detected columns:", df.columns.tolist())
 
 # =========================
 # Headword selector
@@ -121,12 +116,12 @@ general_html = f"""
 """
 st.markdown(general_html, unsafe_allow_html=True)
 
-# ===== General N-grams
+# ===== GENERAL N-GRAMS (PLACED HERE, as you requested)
 gen_bigram = safe(row, "general_bigram")
 gen_trigram = safe(row, "general_trigram")
 
 if gen_bigram or gen_trigram:
-    st.markdown("**N-grams (General)**")
+    st.markdown("**N-grams**")
     st.markdown(render_chips(gen_bigram) + render_chips(gen_trigram), unsafe_allow_html=True)
 
 # ===== Links
@@ -166,12 +161,12 @@ for i in range(1, 6):
     """
     st.markdown(sense_html, unsafe_allow_html=True)
 
-    # ===== Sense N-grams
+    # ===== SENSE N-GRAMS (PLACED HERE, before collocates)
     s_bigram = safe(row, f"sense{i}_bigram")
     s_trigram = safe(row, f"sense{i}_trigram")
 
     if s_bigram or s_trigram:
-        st.markdown(f"**N-grams (Sense {i})**")
+        st.markdown("**N-grams**")
         st.markdown(render_chips(s_bigram) + render_chips(s_trigram), unsafe_allow_html=True)
 
     if safe(row, f"sense{i}_typical_collocates"):
