@@ -4,207 +4,180 @@ import pandas as pd
 # =========================
 # Page config
 # =========================
-st.set_page_config(
-    page_title="Lexical Entry Viewer",
-    layout="wide"
-)
+st.set_page_config(page_title="Lexical Entry Viewer", layout="wide")
 
 # =========================
-# Custom CSS for chips
+# STRONG CSS (force visible)
 # =========================
 st.markdown("""
 <style>
-.chip-container {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 4px;
-    margin-bottom: 6px;
-}
-
-.chip {
-    display: inline-block;
-    padding: 4px 10px;
-    background-color: #f1f3f4;
-    border-radius: 16px;
-    font-size: 0.85rem;
-    color: #202124;
-    border: 1px solid #dadce0;
+body {
+    background-color: #0f172a;
+    color: #e5e7eb;
 }
 
 .section-box {
-    border: 1px solid #e0e0e0;
-    border-radius: 10px;
-    padding: 12px 14px;
-    margin-bottom: 14px;
-    background-color: #fafafa;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+    background-color: #020617;
 }
 
 .section-title {
-    font-weight: 600;
-    font-size: 1.05rem;
-    margin-bottom: 6px;
-    color: #1f1f1f;
+    font-weight: 700;
+    font-size: 1.1rem;
+    margin-bottom: 8px;
+    color: #f8fafc;
 }
 
 .meta-line {
-    font-size: 0.9rem;
+    font-size: 0.95rem;
     margin-bottom: 4px;
+    color: #e5e7eb;
 }
 
 .label {
     font-weight: 600;
-    color: #444;
+    color: #38bdf8;
+}
+
+.chip-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+    margin-bottom: 10px;
+}
+
+.chip {
+    padding: 5px 12px;
+    background-color: #1e293b;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    color: #f8fafc;
+    border: 1px solid #38bdf8;
+    white-space: nowrap;
 }
 </style>
 """, unsafe_allow_html=True)
 
 # =========================
-# Helper functions
+# Helpers
 # =========================
-
-def render_chips(text):
-    """
-    Render semicolon- or comma-separated strings as chips.
-    """
-    if pd.isna(text) or str(text).strip() == "":
-        return ""
-
-    # split on ; or ,
-    parts = [p.strip() for p in str(text).replace(",", ";").split(";") if p.strip()]
-
-    if not parts:
-        return ""
-
-    chips_html = '<div class="chip-container">'
-    for p in parts:
-        chips_html += f'<div class="chip">{p}</div>'
-    chips_html += '</div>'
-
-    return chips_html
-
-
-def safe_get(row, col):
+def safe(row, col):
     if col in row and pd.notna(row[col]):
-        return str(row[col])
+        return str(row[col]).strip()
     return ""
 
+def render_chips(text):
+    if not text:
+        return ""
+    parts = [p.strip() for p in text.replace(",", ";").split(";") if p.strip()]
+    if not parts:
+        return ""
+    html = '<div class="chip-container">'
+    for p in parts:
+        html += f'<div class="chip">{p}</div>'
+    html += '</div>'
+    return html
 
 # =========================
-# Load data
+# Load Excel
 # =========================
-st.sidebar.title("Data source")
+st.sidebar.title("Data")
+uploaded = st.sidebar.file_uploader("Upload your Excel", type=["xlsx"])
 
-uploaded_file = st.sidebar.file_uploader("Upload Excel file", type=["xlsx", "xls"])
-
-if not uploaded_file:
-    st.info("⬅️ Upload your Excel file to start.")
+if not uploaded:
+    st.info("⬅️ Upload your Excel file")
     st.stop()
 
-df = pd.read_excel(uploaded_file)
-
-if df.empty:
-    st.error("Excel file is empty.")
-    st.stop()
+df = pd.read_excel(uploaded)
 
 # =========================
 # Headword selector
 # =========================
-headwords = df["general_word"].dropna().unique().tolist()
-headwords.sort()
+if "general_word" not in df.columns:
+    st.error("Column 'general_word' not found. Check your Excel header.")
+    st.stop()
 
-selected_word = st.sidebar.selectbox("Select headword", headwords)
+words = sorted(df["general_word"].dropna().unique())
+word = st.sidebar.selectbox("Select headword", words)
 
-entry = df[df["general_word"] == selected_word].iloc[0]
+row = df[df["general_word"] == word].iloc[0]
 
 # =========================
-# GENERAL SECTION
+# GENERAL
 # =========================
-st.markdown(f"## {selected_word.upper()}")
+st.markdown(f"## {word.upper()}")
 
-general_box = f"""
+general_html = f"""
 <div class="section-box">
-    <div class="section-title">General</div>
-    <div class="meta-line"><span class="label">Corpus:</span> {safe_get(entry, 'general_corpus')}</div>
-    <div class="meta-line"><span class="label">Frequency:</span> {safe_get(entry, 'general_frequency')} | <span class="label">PMW:</span> {safe_get(entry, 'general_pmw')}</div>
-    <div class="meta-line"><span class="label">Zipf:</span> {safe_get(entry, 'general_zipf')} | <span class="label">Band:</span> {safe_get(entry, 'general_band')}</div>
+  <div class="section-title">General</div>
+  <div class="meta-line"><span class="label">Corpus:</span> {safe(row,'general_corpus')}</div>
+  <div class="meta-line"><span class="label">Frequency:</span> {safe(row,'general_frequency')} | <span class="label">PMW:</span> {safe(row,'general_pmw')}</div>
+  <div class="meta-line"><span class="label">Zipf:</span> {safe(row,'general_zipf')} | <span class="label">Band:</span> {safe(row,'general_band')}</div>
 </div>
 """
-st.markdown(general_box, unsafe_allow_html=True)
+st.markdown(general_html, unsafe_allow_html=True)
 
-# General bigram & trigram chips
-gen_bigram = render_chips(safe_get(entry, "general_bigram"))
-gen_trigram = render_chips(safe_get(entry, "general_trigram"))
+# ===== General N-grams
+gen_bigram = safe(row, "general_bigram")
+gen_trigram = safe(row, "general_trigram")
 
 if gen_bigram or gen_trigram:
     st.markdown("**N-grams (General)**")
-    st.markdown(gen_bigram + gen_trigram, unsafe_allow_html=True)
+    st.markdown(render_chips(gen_bigram) + render_chips(gen_trigram), unsafe_allow_html=True)
 
-# Dictionary & thesaurus links
-col1, col2 = st.columns(2)
-with col1:
-    if safe_get(entry, "general_dictionary"):
-        st.markdown(f"[Dictionary]({safe_get(entry, 'general_dictionary')})")
-with col2:
-    if safe_get(entry, "general_thesaurus"):
-        st.markdown(f"[Thesaurus]({safe_get(entry, 'general_thesaurus')})")
+# ===== Links
+c1, c2 = st.columns(2)
+with c1:
+    if safe(row, "general_dictionary"):
+        st.markdown(f"[Dictionary]({safe(row,'general_dictionary')})")
+with c2:
+    if safe(row, "general_thesaurus"):
+        st.markdown(f"[Thesaurus]({safe(row,'general_thesaurus')})")
 
-# Related headwords & regex
-if safe_get(entry, "general_related_headword"):
-    st.markdown(f"**Related headwords:** {safe_get(entry, 'general_related_headword')}")
+# ===== Related
+if safe(row, "general_related_headword"):
+    st.markdown(f"**Related headwords:** {safe(row,'general_related_headword')}")
 
-if safe_get(entry, "general_related_regex"):
-    st.markdown(f"**Related patterns (regex):** {safe_get(entry, 'general_related_regex')}")
+if safe(row, "general_related_regex"):
+    st.markdown(f"**Related patterns (regex):** {safe(row,'general_related_regex')}")
 
 st.markdown("---")
 
 # =========================
-# SENSE SECTIONS
+# SENSES
 # =========================
-MAX_SENSES = 10  # safety upper bound
-
-for i in range(1, MAX_SENSES + 1):
-    prefix = f"sense{i}_headword"
-    if prefix not in entry or pd.isna(entry[prefix]):
+for i in range(1, 6):
+    if not safe(row, f"sense{i}_headword"):
         continue
 
-    sense_headword = safe_get(entry, f"sense{i}_headword")
-    sense_pos = safe_get(entry, f"sense{i}_pos")
-    sense_freq = safe_get(entry, f"sense{i}_frequency")
-    sense_pmw = safe_get(entry, f"sense{i}_pmw")
-    sense_zipf = safe_get(entry, f"sense{i}_zipf")
-    sense_band = safe_get(entry, f"sense{i}_band")
-    sense_def = safe_get(entry, f"sense{i}_definition")
-    sense_coll = safe_get(entry, f"sense{i}_typical_collocates")
-    sense_ex = safe_get(entry, f"sense{i}_example")
-    sense_domain = safe_get(entry, f"sense{i}_domain")
-    sense_register = safe_get(entry, f"sense{i}_register")
-    sense_year = safe_get(entry, f"sense{i}_year")
-
-    sense_box = f"""
+    sense_html = f"""
     <div class="section-box">
-        <div class="section-title">Sense {i}: {sense_headword} ({sense_pos})</div>
-        <div class="meta-line"><span class="label">Frequency:</span> {sense_freq} | <span class="label">PMW:</span> {sense_pmw}</div>
-        <div class="meta-line"><span class="label">Zipf:</span> {sense_zipf} | <span class="label">Band:</span> {sense_band}</div>
-        <div class="meta-line"><span class="label">Domain:</span> {sense_domain} | <span class="label">Register:</span> {sense_register}</div>
-        <div class="meta-line"><span class="label">Year(s):</span> {sense_year}</div>
-        <div class="meta-line"><span class="label">Definition:</span> {sense_def}</div>
+      <div class="section-title">Sense {i}: {safe(row,f'sense{i}_headword')} ({safe(row,f'sense{i}_pos')})</div>
+      <div class="meta-line"><span class="label">Frequency:</span> {safe(row,f'sense{i}_frequency')} | <span class="label">PMW:</span> {safe(row,f'sense{i}_pmw')}</div>
+      <div class="meta-line"><span class="label">Zipf:</span> {safe(row,f'sense{i}_zipf')} | <span class="label">Band:</span> {safe(row,f'sense{i}_band')}</div>
+      <div class="meta-line"><span class="label">Domain:</span> {safe(row,f'sense{i}_domain')} | <span class="label">Register:</span> {safe(row,f'sense{i}_register')}</div>
+      <div class="meta-line"><span class="label">Year(s):</span> {safe(row,f'sense{i}_year')}</div>
+      <div class="meta-line"><span class="label">Definition:</span> {safe(row,f'sense{i}_definition')}</div>
     </div>
     """
-    st.markdown(sense_box, unsafe_allow_html=True)
+    st.markdown(sense_html, unsafe_allow_html=True)
 
-    # Sense bigram & trigram chips
-    sense_bigram = render_chips(safe_get(entry, f"sense{i}_bigram"))
-    sense_trigram = render_chips(safe_get(entry, f"sense{i}_trigram"))
+    # ===== Sense N-grams
+    s_bigram = safe(row, f"sense{i}_bigram")
+    s_trigram = safe(row, f"sense{i}_trigram")
 
-    if sense_bigram or sense_trigram:
+    if s_bigram or s_trigram:
         st.markdown(f"**N-grams (Sense {i})**")
-        st.markdown(sense_bigram + sense_trigram, unsafe_allow_html=True)
+        st.markdown(render_chips(s_bigram) + render_chips(s_trigram), unsafe_allow_html=True)
 
-    if sense_coll:
-        st.markdown(f"**Typical collocates:** {sense_coll}")
+    if safe(row, f"sense{i}_typical_collocates"):
+        st.markdown(f"**Typical collocates:** {safe(row,f'sense{i}_typical_collocates')}")
 
-    if sense_ex:
-        st.markdown(f"**Example:** {sense_ex}")
+    if safe(row, f"sense{i}_example"):
+        st.markdown(f"**Example:** {safe(row,f'sense{i}_example')}")
 
     st.markdown("---")
