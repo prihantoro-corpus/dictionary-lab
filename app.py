@@ -6,7 +6,7 @@ import re
 st.set_page_config(layout="wide")
 
 # =========================
-# STYLING – Cambridge / Oxford Inspired
+# STYLING
 # =========================
 st.markdown("""
 <style>
@@ -18,7 +18,6 @@ body, .stApp {
 
 h1 { font-size: 42px; margin-bottom: 4px; }
 h2 { font-size: 28px; margin-bottom: 4px; }
-h3 { font-size: 22px; margin-bottom: 4px; }
 
 .block {
     background-color: #141414;
@@ -46,9 +45,12 @@ h3 { font-size: 22px; margin-bottom: 4px; }
     font-weight: 500;
 }
 
-.badge-cefr { background-color: #2d6cdf; }
-.badge-ngsl { background-color: #2f8f2f; }
-.badge-academic { background-color: #8b5cf6; }
+.badge-cefr { background-color: #2563eb; }
+.badge-ngsl { background-color: #15803d; }
+.badge-academic { background-color: #7c3aed; }
+
+.badge-domain { background-color: #0f766e; }
+.badge-register { background-color: #7c2d12; }
 
 .band-badge {
     display: inline-block;
@@ -79,9 +81,6 @@ h3 { font-size: 22px; margin-bottom: 4px; }
     margin-bottom: 6px;
 }
 
-a { color: #5da9ff; text-decoration: none; }
-a:hover { text-decoration: underline; }
-
 .sense-header {
     font-size: 20px;
     font-weight: 600;
@@ -91,7 +90,7 @@ a:hover { text-decoration: underline; }
 .sense-meta {
     color: #cfcfcf;
     font-size: 14px;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
 }
 
 .example {
@@ -139,6 +138,14 @@ def render_wordlist_badges(wordlist_text):
         badges_html += f"<span class='{cls}'>{p}</span>"
     return badges_html
 
+def render_domain_register_badges(domain, register):
+    html = ""
+    if domain:
+        html += f"<span class='badge badge-domain'>{domain}</span>"
+    if register:
+        html += f"<span class='badge badge-register'>{register}</span>"
+    return html
+
 # =========================
 # LOAD ALL EXCEL FILES
 # =========================
@@ -165,86 +172,63 @@ if df.empty:
     st.stop()
 
 # =========================
-# STATISTICS LANDING PAGE (SERIOUS LEXICOGRAPHIC STATS)
+# STATISTICS LANDING PAGE
 # =========================
 st.markdown("<div class='block'>", unsafe_allow_html=True)
 st.markdown("<h2>Dictionary Overview</h2>", unsafe_allow_html=True)
 
 stats_rows = []
 
-# Number of entries
 num_entries = df["general_word"].nunique()
 stats_rows.append({"Metric": "Number of entries (headwords)", "Value": num_entries})
 
-# Number of senses
-sense_cols = [c for c in df.columns if re.match(r"sense\d+_headword", c)]
-num_senses = sum(df[c].notna().sum() for c in sense_cols)
+sense_head_cols = [c for c in df.columns if re.match(r"sense\d+_headword", c)]
+num_senses = sum(df[c].notna().sum() for c in sense_head_cols)
 stats_rows.append({"Metric": "Number of senses (total)", "Value": num_senses})
 
-# POS inventory
 pos_cols = [c for c in df.columns if re.match(r"sense\d+_pos", c)]
 pos_values = []
 for c in pos_cols:
     pos_values.extend(df[c].dropna().astype(str).tolist())
-
 unique_pos = sorted(set(p.strip() for p in pos_values if p.strip()))
+stats_rows.append({"Metric": "POS categories", "Value": ", ".join(unique_pos)})
 stats_rows.append({"Metric": "Number of POS categories", "Value": len(unique_pos)})
-stats_rows.append({"Metric": "POS tags", "Value": ", ".join(unique_pos)})
 
-# Domain inventory
 domain_cols = [c for c in df.columns if re.match(r"sense\d+_domain", c)]
 domain_values = []
 for c in domain_cols:
     domain_values.extend(df[c].dropna().astype(str).tolist())
 unique_domains = sorted(set(d.strip() for d in domain_values if d.strip()))
 stats_rows.append({"Metric": "Domains", "Value": ", ".join(unique_domains)})
-stats_rows.append({"Metric": "Number of domains", "Value": len(unique_domains)})
 
-# Register inventory
 register_cols = [c for c in df.columns if re.match(r"sense\d+_register", c)]
 register_values = []
 for c in register_cols:
     register_values.extend(df[c].dropna().astype(str).tolist())
 unique_registers = sorted(set(r.strip() for r in register_values if r.strip()))
 stats_rows.append({"Metric": "Registers", "Value": ", ".join(unique_registers)})
-stats_rows.append({"Metric": "Number of registers", "Value": len(unique_registers)})
 
-# Frequency bands
 band_cols = [c for c in df.columns if c.endswith("_band")]
 band_values = []
 for c in band_cols:
     band_values.extend(df[c].dropna().astype(str).tolist())
 unique_bands = sorted(set(band_values))
-stats_rows.append({"Metric": "Frequency bands used", "Value": ", ".join(unique_bands)})
-stats_rows.append({"Metric": "Number of frequency bands", "Value": len(unique_bands)})
+stats_rows.append({"Metric": "Frequency bands", "Value": ", ".join(unique_bands)})
 
-# Pronunciation coverage
-if "general_pronunciation" in df.columns:
-    pron_general_count = df["general_pronunciation"].notna().sum()
-    stats_rows.append({"Metric": "Entries with general pronunciation", "Value": pron_general_count})
+pron_general_count = df["general_pronunciation"].notna().sum() if "general_pronunciation" in df.columns else 0
+stats_rows.append({"Metric": "Entries with pronunciation", "Value": pron_general_count})
 
 sense_pron_cols = [c for c in df.columns if re.match(r"sense\d+_pronunciation", c)]
 sense_pron_count = sum(df[c].notna().sum() for c in sense_pron_cols)
 stats_rows.append({"Metric": "Senses with pronunciation", "Value": sense_pron_count})
 
-# N-gram coverage
 ngram_cols = [c for c in df.columns if c.endswith("_bigram") or c.endswith("_trigram")]
 ngram_count = sum(df[c].notna().sum() for c in ngram_cols)
 stats_rows.append({"Metric": "Entries/Senses with n-grams", "Value": ngram_count})
 
-# Collocate coverage
-collocate_cols = [c for c in df.columns if c.endswith("_typical_collocates")]
-collocate_count = sum(df[c].notna().sum() for c in collocate_cols)
-stats_rows.append({"Metric": "Senses with collocate data", "Value": collocate_count})
-
-# Example coverage
-example_cols = [c for c in df.columns if c.endswith("_example")]
-example_count = sum(df[c].notna().sum() for c in example_cols)
-stats_rows.append({"Metric": "Senses with example sentences", "Value": example_count})
-
 stats_df = pd.DataFrame(stats_rows)
-
 st.dataframe(stats_df, use_container_width=True)
+
 st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
@@ -255,13 +239,13 @@ query = st.text_input("Search headword", placeholder="e.g. bank, run, saw")
 if not query:
     st.stop()
 
-row = df[df["general_word"].str.lower() == query.lower()]
+row_df = df[df["general_word"].str.lower() == query.lower()]
 
-if row.empty:
+if row_df.empty:
     st.warning("Word not found.")
     st.stop()
 
-row = row.iloc[0]
+row = row_df.iloc[0]
 
 # =========================
 # GENERAL BLOCK
@@ -270,11 +254,9 @@ st.markdown("<div class='block'>", unsafe_allow_html=True)
 
 st.markdown(f"<h1>{safe(row.get('general_word')).upper()}</h1>", unsafe_allow_html=True)
 
-# Pronunciation
 if safe(row.get("general_pronunciation")):
     st.markdown(f"<div class='pron'>/{safe(row.get('general_pronunciation'))}/</div>", unsafe_allow_html=True)
 
-# Wordlist badges
 badges_html = render_wordlist_badges(safe(row.get("general_wordlist")))
 if badges_html:
     st.markdown(badges_html, unsafe_allow_html=True)
@@ -285,7 +267,7 @@ st.markdown(f"<div class='meta-line'><b>Frequency:</b> {safe(row.get('general_fr
 if safe(row.get("general_band")):
     st.markdown(f"<span class='band-badge'>Band {safe(row.get('general_band'))}</span>", unsafe_allow_html=True)
 
-# N-grams
+# N-grams (general)
 general_bigram = safe(row.get("general_bigram"))
 general_trigram = safe(row.get("general_trigram"))
 if general_bigram or general_trigram:
@@ -298,7 +280,6 @@ if safe(row.get("general_dictionary")):
 if safe(row.get("general_thesaurus")):
     st.markdown(f"[Thesaurus]({safe(row.get('general_thesaurus'))})")
 
-# Related
 if safe(row.get("general_related_headword")):
     st.markdown(f"<div class='section-label'>Related headwords</div>{safe(row.get('general_related_headword'))}", unsafe_allow_html=True)
 if safe(row.get("general_related_regex")):
@@ -307,26 +288,27 @@ if safe(row.get("general_related_regex")):
 st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================
-# SENSES
+# SENSES (ORDERED BY FREQUENCY)
 # =========================
-sense_tabs = []
-sense_indices = []
+senses = []
 
 for i in range(1, 10):
     if safe(row.get(f"sense{i}_headword")):
-        sense_tabs.append(f"Sense {i}")
-        sense_indices.append(i)
+        freq = row.get(f"sense{i}_frequency")
+        freq_val = freq if pd.notna(freq) else 0
+        senses.append((i, freq_val))
 
-if sense_tabs:
-    tabs = st.tabs(sense_tabs)
+senses = sorted(senses, key=lambda x: x[1], reverse=True)
 
-    for tab, i in zip(tabs, sense_indices):
+if senses:
+    tabs = st.tabs([f"Sense {i}" for i, _ in senses])
+
+    for tab, (i, _) in zip(tabs, senses):
         with tab:
             st.markdown("<div class='block'>", unsafe_allow_html=True)
 
             head = safe(row.get(f"sense{i}_headword"))
             pos = safe(row.get(f"sense{i}_pos"))
-
             st.markdown(f"<div class='sense-header'>{head} ({pos})</div>", unsafe_allow_html=True)
 
             if safe(row.get(f"sense{i}_pronunciation")):
@@ -341,12 +323,14 @@ if sense_tabs:
             if safe(row.get(f"sense{i}_band")):
                 st.markdown(f"<span class='band-badge'>Band {safe(row.get(f'sense{i}_band'))}</span>", unsafe_allow_html=True)
 
-            st.markdown(
-                f"<div class='sense-meta'><b>Domain:</b> {safe(row.get(f'sense{i}_domain'))} | "
-                f"<b>Register:</b> {safe(row.get(f'sense{i}_register'))} | "
-                f"<b>Year(s):</b> {safe(row.get(f'sense{i}_year'))}</div>",
-                unsafe_allow_html=True
-            )
+            domain = safe(row.get(f"sense{i}_domain"))
+            register = safe(row.get(f"sense{i}_register"))
+            badge_html = render_domain_register_badges(domain, register)
+            if badge_html:
+                st.markdown(badge_html, unsafe_allow_html=True)
+
+            if safe(row.get(f"sense{i}_year")):
+                st.markdown(f"<div class='sense-meta'><b>Year(s):</b> {safe(row.get(f'sense{i}_year'))}</div>", unsafe_allow_html=True)
 
             sense_bigram = safe(row.get(f"sense{i}_bigram"))
             sense_trigram = safe(row.get(f"sense{i}_trigram"))
