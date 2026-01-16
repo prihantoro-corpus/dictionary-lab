@@ -1,187 +1,174 @@
 import streamlit as st
 import pandas as pd
-import re
+from glob import glob
 
-# =========================
-# Page config
-# =========================
-st.set_page_config(page_title="Lexicographic Viewer", layout="wide")
+st.set_page_config(layout="wide")
 
-# =========================
-# Global CSS (black bg, white text, chips)
-# =========================
+# =======================
+# STYLE (BLACK BG, WHITE TEXT)
+# =======================
 st.markdown("""
 <style>
 body, .stApp {
     background-color: #000000;
     color: #ffffff;
 }
-
-.section-box {
-    border: 1px solid #333;
+.block {
+    background-color: #111111;
+    padding: 18px;
     border-radius: 10px;
-    padding: 14px;
-    margin-bottom: 16px;
-    background-color: #0f0f0f;
+    margin-bottom: 20px;
 }
-
-.section-title {
-    font-size: 20px;
-    font-weight: 700;
-    margin-bottom: 8px;
-}
-
-.meta-line {
-    font-size: 14px;
-    margin-bottom: 4px;
-}
-
-.label {
-    color: #bbbbbb;
-    font-weight: 600;
-}
-
 .chip {
     display: inline-block;
-    padding: 4px 10px;
+    padding: 5px 12px;
     margin: 4px 6px 4px 0;
-    border-radius: 14px;
-    background-color: #1f1f1f;
-    border: 1px solid #555;
+    border-radius: 16px;
+    background-color: #1f3a5f;
+    color: #ffffff;
     font-size: 13px;
 }
-
-hr {
-    border: none;
-    border-top: 1px solid #333;
-    margin: 16px 0;
+.zipf-bar {
+    height: 8px;
+    background-color: #f4c430;
+    border-radius: 4px;
+    margin: 6px 0 10px 0;
 }
+a { color: #4da6ff; }
+h1, h2, h3, h4 { color: #ffffff; }
 </style>
 """, unsafe_allow_html=True)
 
-# =========================
-# Helpers
-# =========================
-def safe(row, col):
-    if col in row and pd.notna(row[col]) and str(row[col]).strip() != "":
-        return str(row[col]).strip()
-    return ""
+# =======================
+# HELPERS
+# =======================
+def safe(x):
+    if pd.isna(x):
+        return ""
+    return str(x).strip()
 
 def render_chips(text):
     if not text:
         return ""
-    items = [t.strip() for t in re.split(r"[;,|]", text) if t.strip()]
-    return "".join([f"<span class='chip'>{item}</span>" for item in items])
+    parts = [p.strip() for p in str(text).split(";") if p.strip()]
+    return "".join([f"<span class='chip'>{p}</span>" for p in parts])
 
-# =========================
-# Load data
-# =========================
-st.title("Lexicographic Entry Viewer")
+def zipf_bar(val):
+    try:
+        v = float(val)
+        width = min((v / 7.0) * 100, 100)
+        return f"<div class='zipf-bar' style='width:{width}%'></div>"
+    except:
+        return ""
 
-uploaded = st.file_uploader("Upload your Excel file", type=["xlsx"])
-if not uploaded:
+# =======================
+# LOAD ALL EXCEL FILES
+# =======================
+def load_all_excels():
+    files = glob("*.xlsx")
+    dfs = []
+    for f in files:
+        try:
+            df = pd.read_excel(f)
+            df["__sourcefile"] = f
+            dfs.append(df)
+        except:
+            pass
+    if dfs:
+        return pd.concat(dfs, ignore_index=True)
+    return pd.DataFrame()
+
+df = load_all_excels()
+
+st.title("Corpus-Based Dictionary Viewer")
+
+if df.empty:
+    st.error("No Excel files found in the project folder.")
     st.stop()
 
-df = pd.read_excel(uploaded)
+# =======================
+# SEARCH
+# =======================
+query = st.text_input("Search headword")
 
-# =========================
-# Select entry
-# =========================
-if "general_word" not in df.columns:
-    st.error("Column 'general_word' not found.")
+if not query:
     st.stop()
 
-word = st.selectbox("Select entry", df["general_word"].dropna().unique())
-row = df[df["general_word"] == word].iloc[0]
+row = df[df["general_word"].str.lower() == query.lower()]
 
-# =========================
-# GENERAL SECTION
-# =========================
-general_html = f"""
-<div class="section-box">
-  <div class="section-title">{safe(row,'general_word')}</div>
-  <div class="meta-line"><span class="label">Corpus:</span> {safe(row,'general_corpus')}</div>
-  <div class="meta-line"><span class="label">Frequency:</span> {safe(row,'general_frequency')} | <span class="label">PMW:</span> {safe(row,'general_pmw')}</div>
-  <div class="meta-line"><span class="label">Zipf:</span> {safe(row,'general_zipf')} | <span class="label">Band:</span> {safe(row,'general_band')}</div>
-</div>
-"""
-st.markdown(general_html, unsafe_allow_html=True)
+if row.empty:
+    st.warning("Word not found.")
+    st.stop()
 
-# ===== GENERAL N-GRAMS (before related headwords)
-g_bigram = safe(row, "general_bigram")
-g_trigram = safe(row, "general_trigram")
+row = row.iloc[0]
 
-if g_bigram or g_trigram:
-    st.markdown("### N-grams")
-    if g_bigram:
-        st.markdown(render_chips(g_bigram), unsafe_allow_html=True)
-    if g_trigram:
-        st.markdown(render_chips(g_trigram), unsafe_allow_html=True)
+# =======================
+# GENERAL BLOCK
+# =======================
+st.markdown("<div class='block'>", unsafe_allow_html=True)
+st.markdown(f"## {safe(row.get('general_word')).upper()}")
+st.markdown("### General")
 
-# ===== Dictionary / Thesaurus
-if safe(row, "general_dictionary"):
-    st.markdown("**Dictionary**")
-    st.markdown(safe(row, "general_dictionary"))
+st.markdown(f"**Corpus:** {safe(row.get('general_corpus'))}")
+st.markdown(f"**Frequency:** {safe(row.get('general_frequency'))} | **PMW:** {safe(row.get('general_pmw'))}")
+st.markdown(f"**Zipf:** {safe(row.get('general_zipf'))} | **Band:** {safe(row.get('general_band'))}")
 
-if safe(row, "general_thesaurus"):
-    st.markdown("**Thesaurus**")
-    st.markdown(safe(row, "general_thesaurus"))
+st.markdown(zipf_bar(row.get("general_zipf")), unsafe_allow_html=True)
 
-# ===== Related headwords / regex
-if safe(row, "general_related_headword"):
-    st.markdown(f"**Related headwords:** {safe(row,'general_related_headword')}")
+# ---- GENERAL N-GRAMS (HERE, BEFORE RELATED HEADWORDS) ----
+general_bigram = safe(row.get("general_bigram"))
+general_trigram = safe(row.get("general_trigram"))
 
-if safe(row, "general_related_regex"):
-    st.markdown(f"**Related patterns (regex):** {safe(row,'general_related_regex')}")
+if general_bigram or general_trigram:
+    st.markdown("**N-grams**")
+    st.markdown(render_chips(general_bigram + ";" + general_trigram), unsafe_allow_html=True)
 
-st.markdown("<hr>", unsafe_allow_html=True)
+# ---- LINKS ----
+if safe(row.get("general_dictionary")):
+    st.markdown(f"[Dictionary]({safe(row.get('general_dictionary'))})")
+if safe(row.get("general_thesaurus")):
+    st.markdown(f"[Thesaurus]({safe(row.get('general_thesaurus'))})")
 
-# =========================
-# DETECT SENSES DYNAMICALLY (REGEX)
-# =========================
-sense_numbers = sorted({
-    int(m.group(1))
-    for col in df.columns
-    for m in [re.match(r"sense(\d+)_headword", col)]
-    if m
-})
+# ---- RELATED ----
+if safe(row.get("general_related_headword")):
+    st.markdown(f"**Related headwords:** {safe(row.get('general_related_headword'))}")
+if safe(row.get("general_related_regex")):
+    st.markdown(f"**Related patterns (regex):** {safe(row.get('general_related_regex'))}")
 
-# =========================
-# RENDER SENSES
-# =========================
-for i in sense_numbers:
-    if not safe(row, f"sense{i}_headword"):
+st.markdown("</div>", unsafe_allow_html=True)
+
+# =======================
+# SENSES
+# =======================
+for i in range(1, 10):
+    head = safe(row.get(f"sense{i}_headword"))
+    if not head:
         continue
 
-    sense_html = f"""
-    <div class="section-box">
-      <div class="section-title">Sense {i}: {safe(row,f'sense{i}_headword')} ({safe(row,f'sense{i}_pos')})</div>
-      <div class="meta-line"><span class="label">Frequency:</span> {safe(row,f'sense{i}_frequency')} | <span class="label">PMW:</span> {safe(row,f'sense{i}_pmw')}</div>
-      <div class="meta-line"><span class="label">Zipf:</span> {safe(row,f'sense{i}_zipf')} | <span class="label">Band:</span> {safe(row,f'sense{i}_band')}</div>
-      <div class="meta-line"><span class="label">Domain:</span> {safe(row,f'sense{i}_domain')} | <span class="label">Register:</span> {safe(row,f'sense{i}_register')}</div>
-      <div class="meta-line"><span class="label">Year(s):</span> {safe(row,f'sense{i}_year')}</div>
-      <div class="meta-line"><span class="label">Definition:</span> {safe(row,f'sense{i}_definition')}</div>
-    </div>
-    """
-    st.markdown(sense_html, unsafe_allow_html=True)
+    st.markdown("<div class='block'>", unsafe_allow_html=True)
+    pos = safe(row.get(f"sense{i}_pos"))
 
-    # ===== SENSE N-GRAMS (before typical collocates)
-    s_bigram = safe(row, f"sense{i}_bigram")
-    s_trigram = safe(row, f"sense{i}_trigram")
+    st.markdown(f"### Sense {i}: {head} ({pos})")
 
-    if s_bigram or s_trigram:
-        st.markdown("### N-grams")
-        if s_bigram:
-            st.markdown(render_chips(s_bigram), unsafe_allow_html=True)
-        if s_trigram:
-            st.markdown(render_chips(s_trigram), unsafe_allow_html=True)
+    st.markdown(f"**Frequency:** {safe(row.get(f'sense{i}_frequency'))} | **PMW:** {safe(row.get(f'sense{i}_pmw'))}")
+    st.markdown(f"**Zipf:** {safe(row.get(f'sense{i}_zipf'))} | **Band:** {safe(row.get(f'sense{i}_band'))}")
 
-    # ===== Typical collocates
-    if safe(row, f"sense{i}_typical_collocates"):
-        st.markdown(f"**Typical collocates:** {safe(row,f'sense{i}_typical_collocates')}")
+    st.markdown(zipf_bar(row.get(f"sense{i}_zipf")), unsafe_allow_html=True)
 
-    # ===== Example
-    if safe(row, f"sense{i}_example"):
-        st.markdown(f"**Example:** {safe(row,f'sense{i}_example')}")
+    st.markdown(f"**Domain:** {safe(row.get(f'sense{i}_domain'))} | **Register:** {safe(row.get(f'sense{i}_register'))}")
+    st.markdown(f"**Year(s):** {safe(row.get(f'sense{i}_year'))}")
 
-    st.markdown("<hr>", unsafe_allow_html=True)
+    # ---- SENSE N-GRAMS (HERE, BEFORE TYPICAL COLLOCATES) ----
+    sense_bigram = safe(row.get(f"sense{i}_bigram"))
+    sense_trigram = safe(row.get(f"sense{i}_trigram"))
+
+    if sense_bigram or sense_trigram:
+        st.markdown("**N-grams**")
+        st.markdown(render_chips(sense_bigram + ";" + sense_trigram), unsafe_allow_html=True)
+
+    st.markdown(f"**Definition:** {safe(row.get(f'sense{i}_definition'))}")
+
+    st.markdown(f"**Typical collocates:** {safe(row.get(f'sense{i}_typical_collocates'))}")
+    st.markdown(f"**Example:** {safe(row.get(f'sense{i}_example'))}")
+
+    st.markdown("</div>", unsafe_allow_html=True)
