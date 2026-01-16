@@ -267,7 +267,7 @@ if search_word:
 
         # =========================
         # N-GRAMS
-        # =========================
+        # ========================= 
         st.markdown("## N-grams")
 
         ngram_text = row.get("general_n-gram_POS")
