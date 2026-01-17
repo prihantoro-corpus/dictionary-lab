@@ -129,7 +129,7 @@ def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), sto
         GROUP BY t2.token
         ORDER BY O11 DESC
         LIMIT 200 
-    """, (token, *params, *filter_params, window, window, *params)).fetchall()
+    """, (token, *params, window, window, *params, *filter_params)).fetchall()
     
     results = []
     for collocate, O11 in collocan_counts:
