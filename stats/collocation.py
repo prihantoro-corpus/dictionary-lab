@@ -1,7 +1,5 @@
-import duckdb
+from pipeline.indexing import get_connection, safe_execute
 import math
-import re
-from pipeline.indexing import get_connection
 
 def parse_collocate_filter(filter_list, alias="t2"):
     """
@@ -62,20 +60,19 @@ def parse_collocate_filter(filter_list, alias="t2"):
     return " AND " + " AND ".join(clauses), params
 
 def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, skip_punct=True):
-    conn = get_connection()
+    conn, is_shared = get_connection()
     if stop_words is None: stop_words = []
     
     results = {}
     
-    # Base CTE
-    cte_matches = f"matches AS (SELECT id, file_id FROM tokens WHERE token = ? AND {where_clause})"
+    # Base CTE (case-insensitive for broad coverage)
+    cte_matches = f"matches AS (SELECT id, file_id FROM tokens WHERE token ILIKE ? AND {where_clause})"
     
     # Filters for neighbors
     neighbor_filter = ""
     neighbor_params = []
     
     if skip_punct:
-        # Simple punctuation check: Token must contain at least one alphanumeric char
         neighbor_filter += " AND regexp_matches(token, '[a-zA-Z0-9]')"
     
     if stop_words:
@@ -88,7 +85,7 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, 
         return neighbor_filter.replace("token", f"{alias}.token")
 
     # 1. Bigram: Search + Word (Forward)
-    results['bi_search_word'] = conn.execute(f"""
+    results['bi_search_word'] = safe_execute(conn, f"""
         WITH {cte_matches},
         next_tokens AS (
             SELECT t2.token as w2
@@ -103,7 +100,7 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, 
     """, (token, *params, *neighbor_params, token, limit)).fetchall()
     
     # 2. Bigram: Word + Search (Backward)
-    results['bi_word_search'] = conn.execute(f"""
+    results['bi_word_search'] = safe_execute(conn, f"""
         WITH {cte_matches},
         prev_tokens AS (
             SELECT t0.token as w0
@@ -118,7 +115,7 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, 
     """, (token, *params, *neighbor_params, token, limit)).fetchall()
     
     # 3. Trigram: Search + Word + Word (s w w)
-    results['tri_s_w_w'] = conn.execute(f"""
+    results['tri_s_w_w'] = safe_execute(conn, f"""
         WITH {cte_matches},
         next2 AS (
             SELECT t1.token as w1, t2.token as w2
@@ -134,7 +131,7 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, 
     """, (token, *params, *neighbor_params, *neighbor_params, token, limit)).fetchall()
     
     # 4. Trigram: Word + Search + Word (w s w)
-    results['tri_w_s_w'] = conn.execute(f"""
+    results['tri_w_s_w'] = safe_execute(conn, f"""
         WITH {cte_matches},
         surround AS (
             SELECT t0.token as w0, t2.token as w2
@@ -150,7 +147,7 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, 
     """, (token, *params, *neighbor_params, *neighbor_params, token, limit)).fetchall()
 
     # 5. Trigram: Word + Word + Search (w w s)
-    results['tri_w_w_s'] = conn.execute(f"""
+    results['tri_w_w_s'] = safe_execute(conn, f"""
         WITH {cte_matches},
         prev2 AS (
             SELECT t0.token as w0, t1.token as w1
@@ -165,15 +162,13 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, 
         ORDER BY freq DESC LIMIT ?
     """, (token, *params, *neighbor_params, *neighbor_params, token, limit)).fetchall()
     
-    conn.close()
+    if not is_shared:
+        conn.close()
     return results
 
 def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), stop_words=None, allowed_words=None, skip_punct=True):
-    conn = get_connection()
+    conn, is_shared = get_connection()
     if stop_words is None: stop_words = []
-    
-    # Allowed words is now a list of filter expressions (strings)
-    # We need to parse this into SQL
     
     filter_sql, filter_params = parse_collocate_filter(allowed_words, alias="t2")
     
@@ -186,23 +181,24 @@ def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), sto
         base_filter_params.extend(stop_words)
 
     if skip_punct:
-         # exclude punctuation tokens
          base_filter_sql += " AND regexp_matches(t2.token, '[a-zA-Z0-9]')"
 
-    N = conn.execute(f"SELECT COUNT(*) FROM tokens WHERE {where_clause}", params).fetchone()[0]
-    if N == 0: return []
+    N = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE {where_clause}", params).fetchone()[0]
+    if N == 0:
+        if not is_shared: conn.close()
+        return []
     
-    node_freq = conn.execute(f"SELECT COUNT(*) FROM tokens WHERE token = ? AND {where_clause}", (token, *params)).fetchone()[0]
-    if node_freq == 0: return []
+    node_freq = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE token ILIKE ? AND {where_clause}", (token, *params)).fetchone()[0]
+    if node_freq == 0:
+        if not is_shared: conn.close()
+        return []
     
-    # Calculate Co-occurrences
-    # combining standard filters + advanced filters
     final_filter_sql = base_filter_sql + filter_sql
     final_params = base_filter_params + filter_params
     
-    collocan_counts = conn.execute(f"""
+    collocan_counts = safe_execute(conn, f"""
         WITH node_ids AS (
-            SELECT id, file_id FROM tokens WHERE token = ? AND {where_clause}
+            SELECT id, file_id FROM tokens WHERE token ILIKE ? AND {where_clause}
         )
         SELECT t2.token, COUNT(*) as O11
         FROM node_ids n
@@ -217,35 +213,47 @@ def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), sto
     
     results = []
     for collocate, O11 in collocan_counts:
-        # We need freq of collocate globally in the corpus (respecting where_clause but NOT the collocate filters?)
-        # Usually standard LogLikelihood compares O11 (co-occurrence) vs Collocate Global Freq.
-        col_freq = conn.execute(f"SELECT COUNT(*) FROM tokens WHERE token = ? AND {where_clause}", (collocate, *params)).fetchone()[0]
+        # Use ILIKE for collocate frequency to match the node's broad matching
+        col_freq = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE token ILIKE ? AND {where_clause}", (collocate, *params)).fetchone()[0]
         
         try:
+            # 1. Expected frequency
             E11 = (node_freq * col_freq) / N
-            if E11 == 0: continue
             
+            # Simple fallback for tiny numbers
             def safe_x_log_x_y(x, y):
-                if x == 0 or y == 0: return 0
+                if x <= 0 or y <= 0: return 0
                 return x * math.log(x / y)
             
-            O12 = node_freq - O11
-            O21 = col_freq - O11
-            O22 = N - (node_freq + col_freq - O11)
+            O12 = max(0, node_freq - O11)
+            O21 = max(0, col_freq - O11)
+            O22 = max(0, N - (node_freq + col_freq - O11))
             
             E12 = (node_freq * (N - col_freq)) / N
             E21 = ((N - node_freq) * col_freq) / N
             E22 = ((N - node_freq) * (N - col_freq)) / N
             
+            # 2. Log-likelihood Calculation
+            # Skip if any expectation is 0 (impossible for valid co-occurrences but safe for floats)
+            if any(e <= 0 for e in [E11, E12, E21, E22]):
+                continue
+
             LL = 2 * (safe_x_log_x_y(O11, E11) + 
                       safe_x_log_x_y(O12, E12) + 
                       safe_x_log_x_y(O21, E21) + 
                       safe_x_log_x_y(O22, E22))
             
+            # 3. Directionality check (Score should be positive for attraction)
+            # Dunning's LL is always positive, but we only care about O11 > E11
+            if O11 < E11:
+                LL = -LL
+            
             results.append({'collocate': collocate, 'freq': O11, 'score': LL})
-        except:
+        except Exception as e:
+            # Silent skip for math errors
             continue
             
     results.sort(key=lambda x: x['score'], reverse=True)
-    conn.close()
+    if not is_shared:
+        conn.close()
     return results[:limit]

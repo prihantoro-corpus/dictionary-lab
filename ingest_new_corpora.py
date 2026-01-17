@@ -25,12 +25,13 @@ def run():
     print("Ingestion complete.")
     
     # Quick count check
-    conn = indexing.get_connection()
-    res = conn.execute("SELECT corpus, COUNT(*) FROM tokens GROUP BY corpus").fetchall()
+    conn, is_shared = indexing.get_connection()
+    res = indexing.safe_execute(conn, "SELECT corpus, COUNT(*) FROM tokens GROUP BY corpus").fetchall()
     print("Corpus stats:")
     for r in res:
         print(f" - {r[0]}: {r[1]} tokens")
-    conn.close()
+    if not is_shared:
+        conn.close()
 
 if __name__ == "__main__":
     run()

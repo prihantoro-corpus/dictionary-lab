@@ -2,7 +2,7 @@ import re
 import duckdb
 import pandas as pd
 import json
-from .indexing import get_connection
+from .indexing import get_connection, safe_execute
 
 class CorpusParser:
     def __init__(self):
@@ -22,7 +22,7 @@ class CorpusParser:
             return 'metadata', attrs
         else:
             # It's a token line
-            parts = line.split('\t')
+            parts = [p.strip() for p in line.split('\t')]
             if len(parts) >= 3:
                 return 'token', {'token': parts[0], 'tag': parts[1], 'lemma': parts[2]}
             elif len(parts) == 1:
@@ -38,11 +38,11 @@ class CorpusParser:
         self.process_file(filepath, corpus_name)
 
     def process_file(self, filepath, corpus_name):
-        conn = get_connection()
+        conn, is_shared = get_connection()
         try:
             # Get current max ID to continue sequence
             try:
-                 res = conn.execute("SELECT MAX(id) FROM tokens").fetchone()
+                 res = safe_execute(conn, "SELECT MAX(id) FROM tokens").fetchone()
                  current_id = res[0] if res[0] is not None else 0
             except:
                 current_id = 0
@@ -84,13 +84,17 @@ class CorpusParser:
             print(f"CRITICAL ERROR during ingestion: {e}")
             raise e
         finally:
-            conn.close()
+            if not is_shared:
+                conn.close()
 
     def _bulk_insert(self, conn, data):
         if not data: return
         try:
             df = pd.DataFrame(data)
-            conn.execute("INSERT INTO tokens SELECT * FROM df")
+            # Register the dataframe with a fixed name to avoid scoping issues in safe_execute
+            conn.register("batch_df", df)
+            safe_execute(conn, "INSERT INTO tokens SELECT * FROM batch_df")
+            conn.unregister("batch_df")
         except Exception as e:
             print(f"Bulk insert failed: {e}")
             raise e

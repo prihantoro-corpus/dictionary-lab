@@ -4,19 +4,20 @@ from pipeline.indexing import get_connection
 
 @st.cache_data
 def get_corpora():
-    conn = get_connection()
+    conn, is_shared = get_connection()
     try:
         res = conn.execute("SELECT DISTINCT corpus FROM tokens ORDER BY corpus").fetchall()
         return [r[0] for r in res if r[0]]
     except Exception:
         return []
     finally:
-        conn.close()
+        if not is_shared:
+            conn.close()
 
 @st.cache_data
 def get_metadata_keys(corpora=None):
     """Returns list of unique keys found in metadata JSON, optionally filtered by corpora."""
-    conn = get_connection()
+    conn, is_shared = get_connection()
     try:
         where_sql = ""
         params = []
@@ -35,12 +36,13 @@ def get_metadata_keys(corpora=None):
     except Exception:
         return []
     finally:
-        conn.close()
+        if not is_shared:
+            conn.close()
 
 @st.cache_data
 def get_metadata_values(key, corpora=None):
     """Returns list of unique values for a specific metadata key, optionally filtered."""
-    conn = get_connection()
+    conn, is_shared = get_connection()
     try:
         where_sql = ""
         params = []
@@ -52,15 +54,21 @@ def get_metadata_values(key, corpora=None):
         query = f"""
             SELECT DISTINCT json_extract_string(metadata, '$.{key}') as v 
             FROM tokens 
-            WHERE json_extract_string(metadata, '$.{key}') IS NOT NULL {where_sql} 
+            WHERE 1=1 {where_sql} 
             ORDER BY v
         """
         res = conn.execute(query, params).fetchall()
-        return [r[0] for r in res if r[0] is not None]
+        vals = [r[0] for r in res if r[0] is not None]
+        # Add N/A if there are tokens without this metadata key
+        has_null = any(r[0] is None for r in res)
+        if has_null:
+            vals.append("None/N/A")
+        return vals
     except Exception:
         return []
     finally:
-        conn.close()
+        if not is_shared:
+            conn.close()
 
 def render():
     st.sidebar.title("DICTIONARY EDITOR")
@@ -82,8 +90,15 @@ def render():
                             tmp.write(uploaded_corpus.getvalue())
                         
                         parser = ingest.CorpusParser()
-                        parser.ingest_file(tmp_path)
-                        st.sidebar.success(f"Ingested {uploaded_corpus.name}")
+                        # Use the original filename (without extension) as the corpus name
+                        corpus_name_display = os.path.splitext(uploaded_corpus.name)[0]
+                        parser.process_file(tmp_path, corpus_name_display)
+                        
+                        # NEW: Exclusively select the newly ingested corpus
+                        st.session_state['last_selection'] = [corpus_name_display]
+                        st.session_state['loaded_corpora'] = [corpus_name_display]
+                        
+                        st.sidebar.success(f"Ingested and Activated {corpus_name_display}")
                     finally:
                         if os.path.exists(tmp_path):
                             os.remove(tmp_path)
@@ -121,47 +136,76 @@ def render():
         # 4. Clear Database (Reset)
         if st.sidebar.button("🗑️ Clear All Corpus Data", help="Delete all tokens from the database. This does NOT affect your saved overrides."):
             from pipeline.indexing import get_connection
-            conn = get_connection()
+            conn, is_shared = get_connection()
             try:
                 conn.execute("DELETE FROM tokens")
                 st.sidebar.warning("Database cleared!")
+                # Clear session state related to corpora
+                if 'loaded_corpora' in st.session_state:
+                    del st.session_state['loaded_corpora']
+                if 'last_selection' in st.session_state:
+                    del st.session_state['last_selection']
                 st.cache_data.clear()
                 st.rerun()
             finally:
-                conn.close()
+                if not is_shared:
+                    conn.close()
 
     st.sidebar.divider()
-    st.sidebar.title("CORPUS SEARCH")
-    
     available_corpora = get_corpora()
     
-    # 1. Corpus Selection
-    # Key concept: "Selection" vs "Loaded"
-    # User selects from list, then clicks Load.
+    # 1. Status Section ( provenance )
+    st.sidebar.subheader("📡 Corpus Status")
+    active_corpora = st.session_state.get('loaded_corpora', [])
+    
+    if not active_corpora:
+        st.sidebar.warning("⭕ No Active Corpora")
+    else:
+        for c in active_corpora:
+            source = "SYSTEM" if c in ["BPPT", "KOSLAT"] else "USER MACHINE"
+            st.sidebar.success(f"✅ {c} ({source})")
+
+    st.sidebar.divider()
+    
+    # 2. Corpus Selection
+    st.sidebar.title("CORPUS SEARCH")
     
     # Defaults? If nothing loaded, maybe default is empty or all? User said "System overload", so default empty.
-    default_sel = st.session_state.get('last_selection', available_corpora) # Keep last choice logic if desirable
+    raw_default = st.session_state.get('last_selection', available_corpora)
+    # CRITICAL: Ensure every default value exists in available_corpora to avoid StreamlitAPIException
+    default_sel = [v for v in raw_default if v in available_corpora]
     
+    if st.sidebar.button("✖️ Deselect All Corpora"):
+        st.session_state['last_selection'] = []
+        st.session_state['loaded_corpora'] = []
+        st.rerun()
+    
+    # Keyconcept: reactive selection
     selection = st.sidebar.multiselect(
-        "Available Corpora",
+        "Select Corpora to Index",
         options=available_corpora,
         default=default_sel,
         key="corpus_multiselect"
     )
     
-    if st.sidebar.button("Load Corpora"):
-        st.session_state['loaded_corpora'] = selection
-        st.session_state['last_selection'] = selection
-        st.rerun() # Refresh to show metadata
+    # Update active list immediately when selection changes
+    st.session_state['loaded_corpora'] = selection
+    st.session_state['last_selection'] = selection
         
     # Get active loaded
-    active_corpora = st.session_state.get('loaded_corpora', [])
+    active_corpora = selection
     
     st.sidebar.divider()
     
     # If nothing loaded, stop here
     if not active_corpora:
-        st.sidebar.warning("No corpora loaded. Select above and click 'Load Corpora'.")
+        st.sidebar.info("💡 Select one or more corpora above to begin.")
+        # Diagnostic button even here
+        if st.sidebar.button("🔍 Diagnose Statistics"):
+             from stats.frequency import get_total_tokens
+             st.sidebar.write(f"Global Tokens: {get_total_tokens()}")
+             st.sidebar.write("Subset Tokens: 0 (No corpora active)")
+             st.sidebar.info("You must select a corpus and click 'Load Corpora' to see data.")
         return {
             'where_clause': "1=0",
             'params': [],
@@ -229,13 +273,32 @@ def render():
         if not selected_vals:
              where_parts.append("1=0")
         else:
-            placeholders = ",".join(["?"] * len(selected_vals))
-            where_parts.append(f"json_extract_string(metadata, '$.{key}') IN ({placeholders})")
-            params.extend(selected_vals)
+            # Handle the "None/N/A" choice
+            if "None/N/A" in selected_vals:
+                actual_vals = [v for v in selected_vals if v != "None/N/A"]
+                if not actual_vals:
+                    where_parts.append(f"json_extract_string(metadata, '$.{key}') IS NULL")
+                else:
+                    placeholders = ",".join(["?"] * len(actual_vals))
+                    where_parts.append(f"(json_extract_string(metadata, '$.{key}') IN ({placeholders}) OR json_extract_string(metadata, '$.{key}') IS NULL)")
+                    params.extend(actual_vals)
+            else:
+                placeholders = ",".join(["?"] * len(selected_vals))
+                where_parts.append(f"json_extract_string(metadata, '$.{key}') IN ({placeholders})")
+                params.extend(selected_vals)
             
     where_clause = " AND ".join(where_parts)
     
-    
+    # Diagnostics
+    if st.sidebar.button("🔍 Diagnose Statistics"):
+        from stats.frequency import get_total_tokens
+        t_total = get_total_tokens()
+        t_subset = get_total_tokens(where_clause, params)
+        st.sidebar.write(f"Global Tokens: {t_total}")
+        st.sidebar.write(f"Subset Tokens: {t_subset}")
+        st.sidebar.code(f"WHERE: {where_clause}")
+        st.sidebar.code(f"PARAMS: {params}")
+
     return {
         'where_clause': where_clause,
         'params': params,

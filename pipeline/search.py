@@ -1,30 +1,28 @@
-import duckdb
-from pipeline.indexing import get_connection
+from pipeline.indexing import get_connection, safe_execute
 import Levenshtein
 
 def autocomplete(prefix, limit=10):
-    conn = get_connection()
-    # optimized prefix search
+    conn, is_shared = get_connection()
     query = "SELECT DISTINCT token FROM tokens WHERE token ILIKE ? LIMIT ?"
-    res = conn.execute(query, (f"{prefix}%", limit)).fetchall()
-    conn.close()
+    res = safe_execute(conn, query, (f"{prefix}%", limit)).fetchall()
+    if not is_shared:
+        conn.close()
     return [r[0] for r in res]
 
 def search_exact(token):
-    conn = get_connection()
-    # Return dataframe of all entries
+    conn, is_shared = get_connection()
     query = "SELECT * FROM tokens WHERE token = ?"
-    df = conn.execute(query, (token,)).fetchdf()
-    conn.close()
+    df = safe_execute(conn, query, (token,)).fetchdf()
+    if not is_shared:
+        conn.close()
     return df
 
 def search_fuzzy(token, limit=5):
-    conn = get_connection()
-    # Get all unique tokens (expensive if large, maybe limit?)
-    # For MVP: Select distinct tokens
-    all_tokens_res = conn.execute("SELECT DISTINCT token FROM tokens").fetchall()
+    conn, is_shared = get_connection()
+    all_tokens_res = safe_execute(conn, "SELECT DISTINCT token FROM tokens").fetchall()
     all_tokens = [r[0] for r in all_tokens_res]
-    conn.close()
+    if not is_shared:
+        conn.close()
     
     # Calculate distance
     # Filter close matches
@@ -39,37 +37,40 @@ def search_fuzzy(token, limit=5):
 
 def get_lemma(token):
     """Returns the most frequent lemma for this token."""
-    conn = get_connection()
-    res = conn.execute("""
+    conn, is_shared = get_connection()
+    res = safe_execute(conn, """
         SELECT lemma, COUNT(*) as c 
         FROM tokens 
-        WHERE token = ? 
+        WHERE token ILIKE ? 
         GROUP BY lemma 
         ORDER BY c DESC 
         LIMIT 1
     """, (token,)).fetchone()
-    conn.close()
+    if not is_shared:
+        conn.close()
     return res[0] if res else token
 
 def get_forms_by_lemma(lemma):
     """Returns all tokens that share this lemma."""
-    conn = get_connection()
-    res = conn.execute("SELECT DISTINCT token FROM tokens WHERE lemma = ?", (lemma,)).fetchall()
-    conn.close()
+    conn, is_shared = get_connection()
+    res = safe_execute(conn, "SELECT DISTINCT token FROM tokens WHERE lemma = ?", (lemma,)).fetchall()
+    if not is_shared:
+        conn.close()
     return [r[0] for r in res]
 
 def get_pos_tags(token):
     """Returns all unique POS tags for this token."""
-    conn = get_connection()
-    res = conn.execute("SELECT DISTINCT tag FROM tokens WHERE token = ?", (token,)).fetchall()
-    conn.close()
+    conn, is_shared = get_connection()
+    res = safe_execute(conn, "SELECT DISTINCT tag FROM tokens WHERE token ILIKE ?", (token,)).fetchall()
+    if not is_shared:
+        conn.close()
     return [r[0] for r in res]
 
 def get_related_words(token, limit=20):
     """Returns tokens containing the search token as a substring (infix), excluding the token itself."""
-    conn = get_connection()
-    # ILIKE %token%
-    query = "SELECT DISTINCT token FROM tokens WHERE token ILIKE ? AND token != ? LIMIT ?"
-    res = conn.execute(query, (f"%{token}%", token, limit)).fetchall()
-    conn.close()
+    conn, is_shared = get_connection()
+    query = "SELECT DISTINCT token FROM tokens WHERE token ILIKE ? AND token NOT ILIKE ? LIMIT ?"
+    res = safe_execute(conn, query, (f"%{token}%", token, limit)).fetchall()
+    if not is_shared:
+        conn.close()
     return [r[0] for r in res]

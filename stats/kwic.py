@@ -1,16 +1,16 @@
-from pipeline.indexing import get_connection
+from pipeline.indexing import get_connection, safe_execute
 
 def get_kwic_lines(token, window=7, limit=50, where_clause="1=1", params=()):
     """
     Returns list of dicts: {left, node, right, metadata}
     """
-    conn = get_connection()
+    conn, is_shared = get_connection()
     
     # 1. Find IDs of the token matching filters
-    matches = conn.execute(f"""
+    matches = safe_execute(conn, f"""
         SELECT id, file_id 
         FROM tokens 
-        WHERE token = ? AND {where_clause} 
+        WHERE token ILIKE ? AND {where_clause} 
         LIMIT ?
     """, (token, *params, limit)).fetchall()
     
@@ -18,11 +18,10 @@ def get_kwic_lines(token, window=7, limit=50, where_clause="1=1", params=()):
     
     for match_id, file_id in matches:
         # 2. For each match, get window
-        # Ensure we stay within same file!
         start_id = match_id - window
         end_id = match_id + window
         
-        window_tokens = conn.execute("""
+        window_tokens = safe_execute(conn, """
             SELECT token, id, file_id
             FROM tokens 
             WHERE id BETWEEN ? AND ? AND file_id = ?
@@ -31,11 +30,13 @@ def get_kwic_lines(token, window=7, limit=50, where_clause="1=1", params=()):
         
         # Assemble
         left = []
-        node = token
+        node = ""
         right = []
         
         for t, tid, tfid in window_tokens:
-            if tid < match_id:
+            if tid == match_id:
+                node = t
+            elif tid < match_id:
                 left.append(t)
             elif tid > match_id:
                 right.append(t)
@@ -44,36 +45,34 @@ def get_kwic_lines(token, window=7, limit=50, where_clause="1=1", params=()):
             'left': " ".join(left),
             'node': node,
             'right': " ".join(right),
-            # 'metadata': ... fetch distinct metadata for this line? 
-            # ideally metadata is same for the whole sentence/segment.
         })
         
-    conn.close()
+    if not is_shared:
+        conn.close()
     return results
 
 def get_collocate_kwic(token, collocate, window=7, limit=5, where_clause="1=1", params=()):
     """
     Returns KWIC lines where BOTH token and collocate appear in the window.
     """
-    conn = get_connection()
+    conn, is_shared = get_connection()
     
-    # Search for pairs
+    # Search for pairs - use subquery for t1 to avoid ambiguous columns in where_clause
     query = f"""
         SELECT t1.id, t1.file_id, t2.id as col_id
-        FROM tokens t1
+        FROM (SELECT id, file_id, token FROM tokens WHERE {where_clause}) t1
         JOIN tokens t2 ON t1.file_id = t2.file_id AND t2.id BETWEEN t1.id - ? AND t1.id + ? AND t1.id != t2.id
-        WHERE t1.token = ? AND t2.token = ? AND {where_clause}
+        WHERE t1.token ILIKE ? AND t2.token ILIKE ?
         LIMIT ?
     """
-    matches = conn.execute(query, (window, window, token, collocate, *params, limit)).fetchall()
+    matches = safe_execute(conn, query, (*params, window, window, token, collocate, limit)).fetchall()
     
     results = []
     for match_id, file_id, col_id in matches:
-        # Context window around the primary match_id
         start = match_id - window
         end = match_id + window
         
-        tokens = conn.execute("""
+        tokens = safe_execute(conn, """
             SELECT id, token FROM tokens 
             WHERE file_id = ? AND id BETWEEN ? AND ?
             ORDER BY id
@@ -83,37 +82,24 @@ def get_collocate_kwic(token, collocate, window=7, limit=5, where_clause="1=1", 
         node = ""
         right = []
         
-        found_node = False
         for tid, t in tokens:
             if tid == match_id:
                 node = t
-                found_node = True
-            elif tid == col_id:
-                # Mark collocate for highlighting if needed, 
-                # but KWIC standard is usually just highlighting the node.
-                # User asked to highlight BOTH. 
-                # We can wrap in special marker or just return the IDs.
-                # Let's return as a list of tokens/is_highlight dicts? 
-                # For simplicity in current UI: return raw strings and let UI handle?
-                # Actually KWIC UI uses left/node/right.
-                # We can't easily highlight with left/node/right.
-                # Let's add a "marked_tokens" list.
-                pass
-            
             if tid < match_id:
                 left.append(t)
             elif tid > match_id:
                 right.append(t)
                 
         results.append({
-            'left': left, # List for easier highlighting
+            'left': left,
             'node': node,
             'right': right,
-            'col_id': col_id, # Absolute ID of collocate in this window
+            'col_id': col_id,
             'match_id': match_id,
             'file_id': file_id,
             'col_token': collocate
         })
         
-    conn.close()
+    if not is_shared:
+        conn.close()
     return results

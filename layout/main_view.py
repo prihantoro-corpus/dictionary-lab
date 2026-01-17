@@ -8,12 +8,12 @@ from stats import frequency, collocation, kwic
 from wordlist import manager
 from layout import components
 
-def render_clickable_word_row(label, words):
+def render_clickable_word_row(label, words, key_prefix="nav", context=""):
     if not words: return
     st.write(f"**{label}**:")
     cols = st.columns(len(words) if len(words) < 10 else 10)
     for i, w in enumerate(words[:20]): # Limit to 20 visually
-        if cols[i % 10].button(w, key=f"nav_{w}_{i}"):
+        if cols[i % 10].button(w, key=f"{key_prefix}_{context}_{w}_{i}"):
             st.session_state.query = w
             st.rerun()
 
@@ -51,7 +51,8 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
     if 'query' not in st.session_state:
         st.session_state.query = ""
 
-    query = st.text_input("Search word:", value=st.session_state.query)
+    query_input = st.text_input("Search word:", value=st.session_state.get('query', ''))
+    query = query_input.strip()
     
     if query:
         # Autocomplete
@@ -146,6 +147,14 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                 # PMW Bar
                 components.render_pmw_bar(metrics_corpus['pmw'] if not is_override else (freq*1000000/1000000)) # Simple calc if manual
                 
+                # NEW: Global existence check for troubleshooting
+                if freq == 0:
+                    global_count = frequency.get_metrics(query, "1=1", [])['frequency']
+                    if global_count > 0:
+                        st.warning(f"⚠️ **{query}** exists in the database ({global_count} times), but it is hidden by your current **Corpus** or **Metadata** filters. Adjust your sidebar selections to see it.")
+                    else:
+                        st.error(f"❌ **{query}** not found anywhere in the current database.")
+
                 st.divider()
                 
                 # Display Definition
@@ -155,9 +164,9 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                 st.divider()
                 
                 # Navigation Rows
-                render_clickable_word_row("Words from same Lemma", same_lemma_words)
+                render_clickable_word_row("Words from same Lemma", same_lemma_words, key_prefix="lemma", context=tag)
                 related = search.get_related_words(query, limit=20)
-                render_clickable_word_row(f"Related Words (containing '{query}')", related)
+                render_clickable_word_row(f"Related Words (containing '{query}')", related, key_prefix="related", context=tag)
                 
                 # Form to Edit
                 render_sense_editor(query, tag, {
@@ -176,44 +185,44 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                 
                 # External Links
                 st.write("**External Links**:")
-                st.markdown(f"[Collins Dictionary](https://www.collinsdictionary.com/dictionary/english/{token}) | [Collins Thesaurus](https://www.collinsdictionary.com/dictionary/english-thesaurus/{token})")
+                st.markdown(f"[Collins Dictionary](https://www.collinsdictionary.com/dictionary/english/{query}) | [Collins Thesaurus](https://www.collinsdictionary.com/dictionary/english-thesaurus/{query})")
                 
                 st.divider()
                 
                 # N-Grams
-                ngrams = collocation.get_ngrams(token, where_clause=where_clause, params=params, stop_words=stop_words, skip_punct=skip_punct)
+                ngrams = collocation.get_ngrams(query, where_clause=where_clause, params=params, stop_words=stop_words, skip_punct=skip_punct)
                 
                 st.subheader("Bigrams")
                 b1, b2 = st.columns(2)
                 with b1:
-                    st.markdown(f"**{token} + Word**")
+                    st.markdown(f"**{query} + Word**")
                     st.table(pd.DataFrame(ngrams['bi_search_word'], columns=['Bigram', 'Freq']).head(5))
                 with b2:
-                    st.markdown(f"**Word + {token}**")
+                    st.markdown(f"**Word + {query}**")
                     st.table(pd.DataFrame(ngrams['bi_word_search'], columns=['Bigram', 'Freq']).head(5))
 
                 st.subheader("Trigrams")
                 t1, t2, t3 = st.columns(3)
                 with t1:
-                    st.markdown(f"**{token} + W + W**")
+                    st.markdown(f"**{query} + W + W**")
                     st.table(pd.DataFrame(ngrams['tri_s_w_w'], columns=['Trigram', 'Freq']).head(5))
                 with t2:
-                    st.markdown(f"**W + {token} + W**")
+                    st.markdown(f"**W + {query} + W**")
                     st.table(pd.DataFrame(ngrams['tri_w_s_w'], columns=['Trigram', 'Freq']).head(5))
                 with t3:
-                    st.markdown(f"**W + W + {token}**")
+                    st.markdown(f"**W + W + {query}**")
                     st.table(pd.DataFrame(ngrams['tri_w_w_s'], columns=['Trigram', 'Freq']).head(5))
                 
                 # Collocates
                 st.subheader("Top-20 Collocates (Log-Likelihood)")
-                collocs = collocation.get_collocates(token, limit=20, where_clause=where_clause, params=params, stop_words=stop_words, allowed_words=collocate_filter, skip_punct=skip_punct)
+                collocs = collocation.get_collocates(query, limit=20, where_clause=where_clause, params=params, stop_words=stop_words, allowed_words=collocate_filter, skip_punct=skip_punct)
                 st.dataframe(pd.DataFrame(collocs)) # dataframe better for larger lists
                 
                 st.divider()
                 
                 # KWIC
                 st.subheader("Examples (KWIC)")
-                kwic_lines = kwic.get_kwic_lines(token, where_clause=where_clause, params=params, limit=10)
+                kwic_lines = kwic.get_kwic_lines(query, where_clause=where_clause, params=params, limit=10)
                 for line in kwic_lines:
                      st.markdown(f"""
                     <div style="display: flex; justify-content: center; font-family: monospace;">
@@ -229,7 +238,7 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                 top_collocs = [c['collocate'] for c in collocs[:3]]
                 for col_word in top_collocs:
                     with st.expander(f"Usage with '{col_word}'", expanded=True):
-                        col_examples = kwic.get_collocate_kwic(token, col_word, where_clause=where_clause, params=params, limit=3)
+                        col_examples = kwic.get_collocate_kwic(query, col_word, where_clause=where_clause, params=params, limit=3)
                         if col_examples:
                             for ex in col_examples:
                                 components.render_collocate_example(ex['left'], ex['node'], ex['right'], ex['col_token'])
@@ -239,10 +248,10 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                 # Save Button
                 st.divider()
                 export_data = {
-                    "token": token,
+                    "token": query,
                     "tag": tag,
-                    "definition": new_def,
-                    "metrics": metrics,
+                    "definition": curr_def,
+                    "metrics": metrics_corpus,
                     "collocates": collocs,
                     "examples": kwic_lines
                 }
@@ -250,7 +259,7 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                 st.download_button(
                     label="💾 Save Entry to JSON",
                     data=json_str,
-                    file_name=f"{token}_{tag}_entry.json",
+                    file_name=f"{query}_{tag}_entry.json",
                     mime="application/json"
                 )
 
