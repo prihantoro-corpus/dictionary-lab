@@ -68,33 +68,36 @@ def render():
     # --- Persistence & Uploads ---
     with st.sidebar.expander("📁 File Management", expanded=True):
         # 1. Corpus Upload
-        uploaded_corpus = st.sidebar.file_uploader("Upload Corpus (vertical, XML, etc.)", type=None)
+        uploaded_corpus = st.sidebar.file_uploader("Upload Corpus (vertical, XML, etc.)", type=None, key="corpus_uploader")
         if uploaded_corpus:
-            with st.spinner("Ingesting corpus..."):
-                from pipeline import ingest
-                import tempfile
-                with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                    tmp.write(uploaded_corpus.getvalue())
-                    tmp_path = tmp.name
-                
-                parser = ingest.CorpusParser()
-                parser.ingest_file(tmp_path)
-                st.sidebar.success(f"Ingested {uploaded_corpus.name}")
-                st.cache_data.clear()
-                st.rerun()
+            if st.sidebar.button("⚙️ Process Uploaded File"):
+                with st.spinner("Ingesting corpus..."):
+                    from pipeline import ingest
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                        tmp.write(uploaded_corpus.getvalue())
+                        tmp_path = tmp.name
+                    
+                    parser = ingest.CorpusParser()
+                    parser.ingest_file(tmp_path)
+                    st.sidebar.success(f"Ingested {uploaded_corpus.name}")
+                    st.cache_data.clear()
+                    st.rerun()
 
         # 2. Upload Changes (JSON)
-        uploaded_json = st.sidebar.file_uploader("Upload Changes (.json)", type=["json"])
+        uploaded_json = st.sidebar.file_uploader("Upload Changes (.json)", type=["json"], key="json_uploader")
         if uploaded_json:
-            try:
-                import json
-                new_overrides = json.load(uploaded_json)
-                if 'overrides' not in st.session_state:
-                    st.session_state['overrides'] = {}
-                st.session_state['overrides'].update(new_overrides)
-                st.sidebar.success("Changes uploaded and merged!")
-            except Exception as e:
-                st.sidebar.error(f"Error loading JSON: {e}")
+            if st.sidebar.button("💾 Apply Changes"):
+                try:
+                    import json
+                    new_overrides = json.load(uploaded_json)
+                    if 'overrides' not in st.session_state:
+                        st.session_state['overrides'] = {}
+                    st.session_state['overrides'].update(new_overrides)
+                    st.sidebar.success("Changes uploaded and merged!")
+                    st.rerun()
+                except Exception as e:
+                    st.sidebar.error(f"Error loading JSON: {e}")
 
         # 3. Save All Changes (Export)
         if st.session_state.get('overrides'):

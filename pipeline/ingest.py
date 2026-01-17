@@ -39,60 +39,59 @@ class CorpusParser:
 
     def process_file(self, filepath, corpus_name):
         conn = get_connection()
-        
-        # Get current max ID to continue sequence
         try:
-             res = conn.execute("SELECT MAX(id) FROM tokens").fetchone()
-             current_id = res[0] if res[0] is not None else 0
-        except:
-            current_id = 0
+            # Get current max ID to continue sequence
+            try:
+                 res = conn.execute("SELECT MAX(id) FROM tokens").fetchone()
+                 current_id = res[0] if res[0] is not None else 0
+            except:
+                current_id = 0
 
-        current_metadata = {}
-        batch_data = []
-        batch_size = 50000
-        
-        print(f"Processing {filepath}...")
-        
-        with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
-            for line in f:
-                type_, data = self.parse_line(line)
-                
-                if type_ == 'metadata':
-                    # Update current metadata state (merge)
-                    current_metadata.update(data)
-                    # If it's a closing tag like </text>, maybe we should clear some metadata?
-                    # For now, assuming standard opening tags update context. 
-                    # Complex nesting might require a stack, but user req says "xml tags will be used to read attribute values".
-                    # Usually "segment" attributes like id, speaker, etc. are consistent within the segment.
+            current_metadata = {}
+            batch_data = []
+            batch_size = 50000
+            
+            print(f"Processing {filepath}...")
+            
+            with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+                for line in f:
+                    type_, data = self.parse_line(line)
                     
-                elif type_ == 'token':
-                    current_id += 1
-                    # Prepare row
-                    row = {
-                        'id': current_id,
-                        'token': data['token'],
-                        'tag': data['tag'],
-                        'lemma': data['lemma'],
-                        'corpus': corpus_name,
-                        'metadata': json.dumps(current_metadata),
-                        'file_id': filepath
-                    }
-                    batch_data.append(row)
-                
-                if len(batch_data) >= batch_size:
-                    self._bulk_insert(conn, batch_data)
-                    batch_data = []
-        
-        if batch_data:
-            self._bulk_insert(conn, batch_data)
-        
-        print(f"Finished processing {filepath}. Total tokens: {current_id}")
-        conn.close()
+                    if type_ == 'metadata':
+                        current_metadata.update(data)
+                    elif type_ == 'token':
+                        current_id += 1
+                        row = {
+                            'id': current_id,
+                            'token': data['token'],
+                            'tag': data['tag'],
+                            'lemma': data['lemma'],
+                            'corpus': corpus_name,
+                            'metadata': json.dumps(current_metadata),
+                            'file_id': filepath
+                        }
+                        batch_data.append(row)
+                    
+                    if len(batch_data) >= batch_size:
+                        self._bulk_insert(conn, batch_data)
+                        batch_data = []
+            
+            if batch_data:
+                self._bulk_insert(conn, batch_data)
+            
+            print(f"Finished processing {filepath}. Total tokens: {current_id}")
+        except Exception as e:
+            print(f"CRITICAL ERROR during ingestion: {e}")
+            raise e
+        finally:
+            conn.close()
 
     def _bulk_insert(self, conn, data):
-        # Using Pandas for easy insertion into DuckDB
-        df = pd.DataFrame(data)
-        # duckdb.appender or convert to SQL
-        # df.to_sql is slow. DuckDB 'INSERT INTO table SELECT * FROM df' is fast.
-        conn.execute("INSERT INTO tokens SELECT * FROM df")
+        if not data: return
+        try:
+            df = pd.DataFrame(data)
+            conn.execute("INSERT INTO tokens SELECT * FROM df")
+        except Exception as e:
+            print(f"Bulk insert failed: {e}")
+            raise e
 
