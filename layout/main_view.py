@@ -67,15 +67,26 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                 metrics = frequency.get_metrics(token, where_clause, params)
                 
                 # Header
-                c1, c2, c3, c4 = st.columns(4)
+                c1, c2, c3, c4, c5 = st.columns(5)
                 c1.header(token)
                 try:
                     pron = ipa.convert(token)
                 except:
                     pron = token
                 c2.text(f"/{pron}/") 
-                c3.metric("Frequency", metrics['frequency'])
-                with c4:
+                
+                # Wordlists / CEFR (Moved here)
+                with c3:
+                    st.caption("Wordlists / CEFR")
+                    wl_badges = manager.check_token(token)
+                    if wl_badges:
+                        for b in wl_badges:
+                            components.render_badge(f"{b['name']}={b['value']}", type="wordlist")
+                    else:
+                        st.caption("None")
+                
+                c4.metric("Frequency", metrics['frequency'])
+                with c5:
                     components.render_zipf_band(metrics['zipf'])
                     
                 components.render_pmw_bar(metrics['pmw'])
