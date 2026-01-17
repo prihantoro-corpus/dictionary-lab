@@ -39,11 +39,13 @@ def run_verify():
     
     print("\nTesting Metadata Extraction...")
     from layout import sidebar
-    keys = sidebar.get_metadata_keys()
-    print(f"Metadata Keys: {keys}")
+    # Need to pass corpora list now or None
+    # Passing None to test "all"
+    keys = sidebar.get_metadata_keys(corpora=None)
+    print(f"Metadata Keys (All): {keys}")
     if keys:
-        vals = sidebar.get_metadata_values(keys[0])
-        print(f"Values for {keys[0]}: {vals}")
+        vals = sidebar.get_metadata_values(keys[0], corpora=None)
+        print(f"Values for {keys[0]} (All): {vals}")
         
     print("Done.")
 

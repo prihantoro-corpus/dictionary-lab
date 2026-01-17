@@ -14,17 +14,23 @@ def get_corpora():
         conn.close()
 
 @st.cache_data
-def get_metadata_keys():
-    """Returns list of unique keys found in metadata JSON."""
+def get_metadata_keys(corpora=None):
+    """Returns list of unique keys found in metadata JSON, optionally filtered by corpora."""
     conn = get_connection()
     try:
-        # Unnest keys and find distinct ones
-        # Check if table exists first
-        res = conn.execute("""
+        where_sql = ""
+        params = []
+        if corpora:
+            placeholders = ",".join(["?"] * len(corpora))
+            where_sql = f"AND corpus IN ({placeholders})"
+            params = list(corpora)
+        
+        query = f"""
             SELECT DISTINCT unnest(json_keys(metadata)) as k 
             FROM tokens 
-            WHERE metadata IS NOT NULL
-        """).fetchall()
+            WHERE metadata IS NOT NULL {where_sql}
+        """
+        res = conn.execute(query, params).fetchall()
         return sorted([r[0] for r in res])
     except Exception:
         return []
@@ -32,13 +38,24 @@ def get_metadata_keys():
         conn.close()
 
 @st.cache_data
-def get_metadata_values(key):
-    """Returns list of unique values for a specific metadata key."""
+def get_metadata_values(key, corpora=None):
+    """Returns list of unique values for a specific metadata key, optionally filtered."""
     conn = get_connection()
     try:
-        # Use json_extract_string
-        query = f"SELECT DISTINCT json_extract_string(metadata, '$.{key}') as v FROM tokens WHERE json_extract_string(metadata, '$.{key}') IS NOT NULL ORDER BY v"
-        res = conn.execute(query).fetchall()
+        where_sql = ""
+        params = []
+        if corpora:
+            placeholders = ",".join(["?"] * len(corpora))
+            where_sql = f"AND corpus IN ({placeholders})"
+            params = list(corpora)
+
+        query = f"""
+            SELECT DISTINCT json_extract_string(metadata, '$.{key}') as v 
+            FROM tokens 
+            WHERE json_extract_string(metadata, '$.{key}') IS NOT NULL {where_sql} 
+            ORDER BY v
+        """
+        res = conn.execute(query, params).fetchall()
         return [r[0] for r in res if r[0] is not None]
     except Exception:
         return []
@@ -48,33 +65,56 @@ def get_metadata_values(key):
 def render():
     st.sidebar.title("CORPUS")
     
-    # Corpus Selection
     available_corpora = get_corpora()
-    selected_corpora = st.sidebar.multiselect(
-        "Select corpora",
+    
+    # 1. Corpus Selection
+    # Key concept: "Selection" vs "Loaded"
+    # User selects from list, then clicks Load.
+    
+    # Defaults? If nothing loaded, maybe default is empty or all? User said "System overload", so default empty.
+    default_sel = st.session_state.get('last_selection', available_corpora) # Keep last choice logic if desirable
+    
+    selection = st.sidebar.multiselect(
+        "Available Corpora",
         options=available_corpora,
-        default=available_corpora
+        default=default_sel,
+        key="corpus_multiselect"
     )
     
+    if st.sidebar.button("Load Corpora"):
+        st.session_state['loaded_corpora'] = selection
+        st.session_state['last_selection'] = selection
+        st.rerun() # Refresh to show metadata
+        
+    # Get active loaded
+    active_corpora = st.session_state.get('loaded_corpora', [])
+    
     st.sidebar.divider()
+    
+    # If nothing loaded, stop here
+    if not active_corpora:
+        st.sidebar.warning("No corpora loaded. Select above and click 'Load Corpora'.")
+        return {
+            'where_clause': "1=0",
+            'params': [],
+            'stop_words': [],
+            'collocate_filter': []
+        }
+    
+    st.sidebar.success(f"Active: {len(active_corpora)} corpora")
+    
     st.sidebar.title("METADATA")
     
-    # Dynamic Metadata Selection
-    meta_keys = get_metadata_keys()
+    # Dynamic Metadata Selection (Context-aware)
+    meta_keys = get_metadata_keys(active_corpora)
     selected_metadata = {}
     
     if not meta_keys:
-        st.sidebar.caption("No metadata attributes found.")
+        st.sidebar.caption("No metadata attributes found in loaded corpora.")
     
     for key in meta_keys:
-        values = get_metadata_values(key)
+        values = get_metadata_values(key, active_corpora)
         if values:
-            # Default: All selected? Or None? User said "all metadata attribute values must by default be shown".
-            # Multiselect default=values means all selected (no filter applied effectively if logic is 'in').
-            # Logic: If nothing selected -> No filter? Or Everything selected -> No filter.
-            # Usually in simple UI, "All" is implied if nothing specific is excluded. 
-            # But `st.multiselect` returns list.
-            # Let's default to ALL.
             sel = st.sidebar.multiselect(
                 f"{key}",
                 options=values,
@@ -89,38 +129,24 @@ def render():
     stop_words_str = st.sidebar.text_input("N-gram Stop Words", placeholder="in, the, of...")
     collocate_filter_str = st.sidebar.text_input("Collocate Filter", placeholder="word, ...")
     
-    # Processing inputs
     stop_words = [s.strip() for s in stop_words_str.split(',')] if stop_words_str else []
     collocate_filter = [s.strip() for s in collocate_filter_str.split(',')] if collocate_filter_str else []
     
-    # Build SQL Clause
-    where_parts = ["1=1"]
+    # Build SQL
+    where_parts = []
     params = []
     
-    # Corpus Filter
-    if selected_corpora:
-        placeholders = ",".join(["?"] * len(selected_corpora))
-        where_parts.append(f"corpus IN ({placeholders})")
-        params.extend(selected_corpora)
-    else:
-        where_parts.append("1=0") 
+    # Corpus Filter (Active)
+    placeholders = ",".join(["?"] * len(active_corpora))
+    where_parts.append(f"corpus IN ({placeholders})")
+    params.extend(active_corpora)
     
     # Metadata Filters
     for key, selected_vals in selected_metadata.items():
-        # If user deselected some items, we filter. 
-        # If selected list == all values, we technically don't need to filter, but robust way is to just filter IN (...)
         if not selected_vals:
-            # If nothing selected for a category, assume 0 matches for that category? 
-            # Or ignore? Usually if you uncheck all "years", you want no results?
-            # Let's assume uncheck all = 0 results.
              where_parts.append("1=0")
         else:
-            # Only add filter if it is a subset? 
-            # For simplicity and correctness with "default all", we just add the IN clause.
-            # Optimization: If len(selected) == len(all), skip? (Saves query complexity)
-            # For now, just add it.
             placeholders = ",".join(["?"] * len(selected_vals))
-            # JSON extract
             where_parts.append(f"json_extract_string(metadata, '$.{key}') IN ({placeholders})")
             params.extend(selected_vals)
             
