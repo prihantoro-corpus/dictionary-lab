@@ -27,7 +27,8 @@ def main():
         where_clause=filters['where_clause'], 
         params=filters['params'],
         stop_words=filters['stop_words'],
-        collocate_filter=filters['collocate_filter']
+        collocate_filter=filters['collocate_filter'],
+        skip_punct=filters.get('skip_punct', True)
     )
 
 if __name__ == "__main__":

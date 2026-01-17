@@ -38,12 +38,25 @@ def run_verify():
     else:
         print("FAIL Structure")
         
-    print("\nTesting Collocate Filters...")
-    # Filter for 'eat' only
-    # Note: get_collocates(..., allowed_words=["eat"]) no longer takes params? No, we fixed params order.
-    # verify.py doesn't supply 'where_clause' so params=().
-    collocs = collocation.get_collocates("apple", allowed_words=["eat"])
-    print(f"Collocates for 'apple' (allowed=['eat']): {collocs}")
+    print("\nTesting Collocate Filters (Advanced)...")
+    # Test 1: Wildcard *pp* (should find apple/apples if self-match allowed/present nearby)
+    collocs_wc = collocation.get_collocates("apple", allowed_words=["*pp*"])
+    print(f"Wildcard *pp*: {collocs_wc}")
+    
+    # Test 2: Regex (app|eat)
+    collocs_re = collocation.get_collocates("apple", allowed_words=["(app|eat)"])
+    print(f"Regex (app|eat): {collocs_re}")
+    
+    # Test 3: Skip Punctuation (default True)
+    # Hard to test without punctuation in sample. But we can ensure it runs.
+    collocs_punct = collocation.get_collocates("apple", skip_punct=True)
+    print(f"Skip Punct True: Runs OK")
+    
+    print("\nTesting N-Grams (Filters)...")
+    # Check if stop words removal works (hide 'is')
+    ngrams_sw = collocation.get_ngrams("apple", stop_words=["is"])
+    # If 'apple is' was a bigram, it should now be gone from 'bi_search_word'
+    print("N-Grams with SW: Runs OK")
     
     print("\nTesting Metadata Extraction...")
     from layout import sidebar

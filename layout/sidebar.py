@@ -126,8 +126,23 @@ def render():
     
     # Filters
     st.sidebar.subheader("Filters")
-    stop_words_str = st.sidebar.text_input("N-gram Stop Words", placeholder="in, the, of...")
-    collocate_filter_str = st.sidebar.text_input("Collocate Filter", placeholder="word, ...")
+    
+    skip_punct = st.sidebar.checkbox("Skip Punctuation", value=True, help="Exclude punctuation marks and symbols from N-grams and Collocates.")
+    
+    stop_words_help = "Comma-separated list of words to exclude (e.g. 'the, of, a'). N-grams containing these words will be hidden."
+    stop_words_str = st.sidebar.text_input("N-gram Stop Words", placeholder="in, the, of...", help=stop_words_help)
+    
+    col_filter_help = """
+    Advanced Collocate Filtering:
+    - **Exact Match**: `of` (Include only 'of')
+    - **Wildcard**: `car*` (Starts with 'car'), `*car` (Ends with 'car'), `*car*` (Contains 'car')
+    - **Regex**: `(of|in)` (Matches 'of' or 'in')
+    - **POS Inclusion**: `_JJ` (Include only Adjectives)
+    - **POS Exclusion**: `-NN` (Exclude Nouns)
+    
+    Combine with commas (OR logic for inclusions, AND logic for exclusions).
+    """
+    collocate_filter_str = st.sidebar.text_input("Collocate Filter", placeholder="word, _TAG, ...", help=col_filter_help)
     
     stop_words = [s.strip() for s in stop_words_str.split(',')] if stop_words_str else []
     collocate_filter = [s.strip() for s in collocate_filter_str.split(',')] if collocate_filter_str else []
@@ -156,5 +171,6 @@ def render():
         'where_clause': where_clause,
         'params': params,
         'stop_words': stop_words,
-        'collocate_filter': collocate_filter
+        'collocate_filter': collocate_filter, # This is now a list of strings to be parsed later
+        'skip_punct': skip_punct
     }

@@ -8,7 +8,7 @@ from stats import frequency, collocation, kwic
 from wordlist import manager
 from layout import components
 
-def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None):
+def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None, skip_punct=True):
     if stop_words is None: stop_words = []
     if collocate_filter is None: collocate_filter = []
     
@@ -125,7 +125,7 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                 st.divider()
                 
                 # N-Grams
-                ngrams = collocation.get_ngrams(token, where_clause=where_clause, params=params)
+                ngrams = collocation.get_ngrams(token, where_clause=where_clause, params=params, stop_words=stop_words, skip_punct=skip_punct)
                 
                 st.subheader("Bigrams")
                 b1, b2 = st.columns(2)
@@ -150,7 +150,7 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                 
                 # Collocates
                 st.subheader("Top-20 Collocates (Log-Likelihood)")
-                collocs = collocation.get_collocates(token, limit=20, where_clause=where_clause, params=params, stop_words=stop_words, allowed_words=collocate_filter)
+                collocs = collocation.get_collocates(token, limit=20, where_clause=where_clause, params=params, stop_words=stop_words, allowed_words=collocate_filter, skip_punct=skip_punct)
                 st.dataframe(pd.DataFrame(collocs)) # dataframe better for larger lists
                 
                 st.divider()
