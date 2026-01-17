@@ -24,7 +24,13 @@ def run_verify():
     pos = search.get_pos_tags("apple")
     print(f"POS tags for 'apple': {pos}")
     
+    # Related Words
+    related = search.get_related_words("apple")
+    print(f"Related words to 'apple': {related}")
+
     print("\nTesting N-Grams (New Structure)...")
+    # This should now work without exception even with filters (passed as params to get_ngrams, though verify script might default params)
+    # The verify script calls get_ngrams("apple") -> params=().
     ngrams = collocation.get_ngrams("apple")
     print("Keys in ngrams:", list(ngrams.keys()))
     if 'bi_search_word' in ngrams:
@@ -34,6 +40,8 @@ def run_verify():
         
     print("\nTesting Collocate Filters...")
     # Filter for 'eat' only
+    # Note: get_collocates(..., allowed_words=["eat"]) no longer takes params? No, we fixed params order.
+    # verify.py doesn't supply 'where_clause' so params=().
     collocs = collocation.get_collocates("apple", allowed_words=["eat"])
     print(f"Collocates for 'apple' (allowed=['eat']): {collocs}")
     

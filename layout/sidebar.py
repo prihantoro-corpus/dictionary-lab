@@ -114,7 +114,7 @@ def render():
     
     for key in meta_keys:
         values = get_metadata_values(key, active_corpora)
-        if values:
+        if values and len(values) <= 20:
             sel = st.sidebar.multiselect(
                 f"{key}",
                 options=values,

@@ -21,7 +21,7 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=()):
         FROM next_tokens
         GROUP BY w2
         ORDER BY freq DESC LIMIT ?
-    """, (token, token, limit)).fetchall()
+    """, (token, *params, token, limit)).fetchall()
     
     # 2. Bigram: Word + Search (Backward)
     results['bi_word_search'] = conn.execute(f"""
@@ -35,7 +35,7 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=()):
         FROM prev_tokens
         GROUP BY w0
         ORDER BY freq DESC LIMIT ?
-    """, (token, token, limit)).fetchall()
+    """, (token, *params, token, limit)).fetchall()
     
     # 3. Trigram: Search + Word + Word (s w w)
     results['tri_s_w_w'] = conn.execute(f"""
@@ -50,7 +50,7 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=()):
         FROM next2
         GROUP BY w1, w2
         ORDER BY freq DESC LIMIT ?
-    """, (token, token, limit)).fetchall()
+    """, (token, *params, token, limit)).fetchall()
     
     # 4. Trigram: Word + Search + Word (w s w)
     results['tri_w_s_w'] = conn.execute(f"""
@@ -65,7 +65,7 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=()):
         FROM surround
         GROUP BY w0, w2
         ORDER BY freq DESC LIMIT ?
-    """, (token, token, limit)).fetchall()
+    """, (token, *params, token, limit)).fetchall()
 
     # 5. Trigram: Word + Word + Search (w w s)
     results['tri_w_w_s'] = conn.execute(f"""
@@ -80,7 +80,7 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=()):
         FROM prev2
         GROUP BY w0, w1
         ORDER BY freq DESC LIMIT ?
-    """, (token, token, limit)).fetchall()
+    """, (token, *params, token, limit)).fetchall()
     
     conn.close()
     return results

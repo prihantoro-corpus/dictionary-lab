@@ -64,3 +64,12 @@ def get_pos_tags(token):
     res = conn.execute("SELECT DISTINCT tag FROM tokens WHERE token = ?", (token,)).fetchall()
     conn.close()
     return [r[0] for r in res]
+
+def get_related_words(token, limit=20):
+    """Returns tokens containing the search token as a substring (infix), excluding the token itself."""
+    conn = get_connection()
+    # ILIKE %token%
+    query = "SELECT DISTINCT token FROM tokens WHERE token ILIKE ? AND token != ? LIMIT ?"
+    res = conn.execute(query, (f"%{token}%", token, limit)).fetchall()
+    conn.close()
+    return [r[0] for r in res]

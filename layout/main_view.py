@@ -28,7 +28,7 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
              for i, sugg in enumerate(suggestions[:5]):
                  if cols[i].button(sugg, key=f"sugg_{sugg}"):
                      st.session_state.query = sugg
-                     st.experimental_rerun()
+                     st.rerun()
         
         # Exact Search
         df = search.search_exact(query)
@@ -41,7 +41,7 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                 for ft in fuzzy_tokens:
                     if st.button(ft, key=f"fuzzy_{ft}"):
                         st.session_state.query = ft
-                        st.experimental_rerun()
+                        st.rerun()
             return
             
         # Group by POS
@@ -91,7 +91,17 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                 
                 # Info Block
                 st.write(f"**Headword/Lemma**: {lemma}")
-                st.write(f"**Words from same Lemma**: {', '.join(same_lemma_words)}")
+                
+                display_forms = same_lemma_words[:20]
+                distinct_forms_str = ', '.join(display_forms)
+                if len(same_lemma_words) > 20:
+                    distinct_forms_str += f", ... (+{len(same_lemma_words)-20} more)"
+                st.write(f"**Words from same Lemma**: {distinct_forms_str}")
+                
+                # Related Words (Regex/Infix match)
+                related = search.get_related_words(token, limit=20)
+                if related:
+                     st.write(f"**Related Words** (containing '{token}'): {', '.join(related)}")
                 
                 st.write("**All POS Tags**:")
                 cols_pos = st.columns(len(all_pos_tags) if len(all_pos_tags) < 10 else 10)
