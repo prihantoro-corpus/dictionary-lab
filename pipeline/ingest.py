@@ -31,6 +31,12 @@ class CorpusParser:
             else:
                  return 'token', {'token': parts[0], 'tag': parts[1] if len(parts)>1 else 'UNK', 'lemma': parts[2] if len(parts)>2 else parts[0]}
 
+    def ingest_file(self, filepath):
+        """Simplifies ingestion by using filename as corpus name."""
+        import os
+        corpus_name = os.path.splitext(os.path.basename(filepath))[0]
+        self.process_file(filepath, corpus_name)
+
     def process_file(self, filepath, corpus_name):
         conn = get_connection()
         

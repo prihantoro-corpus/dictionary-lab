@@ -8,11 +8,44 @@ from stats import frequency, collocation, kwic
 from wordlist import manager
 from layout import components
 
+def render_clickable_word_row(label, words):
+    if not words: return
+    st.write(f"**{label}**:")
+    cols = st.columns(len(words) if len(words) < 10 else 10)
+    for i, w in enumerate(words[:20]): # Limit to 20 visually
+        if cols[i % 10].button(w, key=f"nav_{w}_{i}"):
+            st.session_state.query = w
+            st.rerun()
+
+def render_sense_editor(token, tag, initial_data):
+    """
+    Renders a form to edit sense fields.
+    initial_data: dict with definition, pronunciation, frequency, etc.
+    """
+    with st.expander(f"📝 Edit Sense ({tag})", expanded=False):
+        new_pron = st.text_input("Pronunciation", value=initial_data.get('pronunciation', ''), key=f"edit_pron_{token}_{tag}")
+        new_freq = st.number_input("Frequency", value=int(initial_data.get('frequency', 0)), key=f"edit_freq_{token}_{tag}")
+        new_def = st.text_area("Definition", value=initial_data.get('definition', ''), key=f"edit_def_{token}_{tag}")
+        
+        if st.button("Save Changes", key=f"save_{token}_{tag}"):
+            if token not in st.session_state['overrides']:
+                st.session_state['overrides'][token] = {}
+            st.session_state['overrides'][token][tag] = {
+                "pronunciation": new_pron,
+                "frequency": new_freq,
+                "definition": new_def,
+                "is_manual": True
+            }
+            st.success("Saved!")
+            st.rerun()
+
 def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None, skip_punct=True):
     if stop_words is None: stop_words = []
     if collocate_filter is None: collocate_filter = []
     
-    st.title("Dictionary Search")
+    if 'overrides' not in st.session_state:
+        st.session_state['overrides'] = {}
+
     
     # Session state for query
     if 'query' not in st.session_state:
@@ -46,9 +79,15 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
             
         # Group by POS
         grouped = df.groupby('tag')
+
+        # Overrides for this query
+        query_overrides = st.session_state['overrides'].get(query, {})
+        
+        # Tags from BOTH corpus and overrides
+        all_display_tags = sorted(list(set(list(grouped.groups.keys()) + list(query_overrides.keys()))))
         
         # Sense Tabs + Add Sense
-        sense_labels = [f"Sense: {tag}" for tag in grouped.groups.keys()]
+        sense_labels = [f"Sense: {tag}" for tag in all_display_tags]
         sense_labels.append("➕ Add Sense")
         
         tabs = st.tabs(sense_labels)
@@ -56,63 +95,76 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
         # Pre-fetch common data
         lemma = search.get_lemma(query)
         same_lemma_words = search.get_forms_by_lemma(lemma)
-        all_pos_tags = search.get_pos_tags(query)
+        all_pos_tags = sorted(list(set(search.get_pos_tags(query) + list(query_overrides.keys()))))
         
-        # Render existing senses
-        for i, (tag, group_df) in enumerate(grouped):
+        # Global metrics for this token (from corpus)
+        metrics_corpus = frequency.get_metrics(query, where_clause, params)
+
+        # Render senses
+        for i, tag in enumerate(all_display_tags):
             with tabs[i]:
-                token = query # or group_df.iloc[0]['token']
+                # Data from overrides
+                override = query_overrides.get(tag, {})
+                is_override = bool(override)
                 
-                # Metrics
-                metrics = frequency.get_metrics(token, where_clause, params)
+                # 1. Definition
+                def_key = f"def_{query}_{tag}"
+                # Precedence: Override > SessionState > Corpus (none here)
+                curr_def = override.get('definition') or st.session_state.get(def_key, "")
+                
+                # 2. Pronunciation
+                # Precedence: Override > default IPA
+                try:
+                    default_pron = ipa.convert(query)
+                except:
+                    default_pron = query
+                pron = override.get('pronunciation') or default_pron
+                
+                # 3. Frequency
+                # Precedence: Override > Corpus
+                freq = override.get('frequency') if 'frequency' in override else metrics_corpus['frequency']
                 
                 # Header
                 c1, c2, c3, c4, c5 = st.columns(5)
-                c1.header(token)
-                try:
-                    pron = ipa.convert(token)
-                except:
-                    pron = token
+                c1.header(query)
                 c2.text(f"/{pron}/") 
                 
-                # Wordlists / CEFR (Moved here)
+                # Wordlists / CEFR
                 with c3:
                     st.caption("Wordlists / CEFR")
-                    wl_badges = manager.check_token(token)
+                    wl_badges = manager.check_token(query)
                     if wl_badges:
                         for b in wl_badges:
                             components.render_badge(f"{b['name']}={b['value']}", type="wordlist")
                     else:
                         st.caption("None")
                 
-                c4.metric("Frequency", metrics['frequency'])
+                c4.metric("Frequency", freq)
                 with c5:
-                    components.render_zipf_band(metrics['zipf'])
+                    components.render_zipf_band(metrics_corpus['zipf'])
                     
-                components.render_pmw_bar(metrics['pmw'])
+                # PMW Bar
+                components.render_pmw_bar(metrics_corpus['pmw'] if not is_override else (freq*1000000/1000000)) # Simple calc if manual
                 
                 st.divider()
                 
-                # Definition
-                def_key = f"def_{token}_{tag}"
-                curr_def = st.session_state.get(def_key, "")
-                new_def = st.text_area("Definition", value=curr_def, key=f"input_{def_key}")
-                if new_def != curr_def:
-                    st.session_state[def_key] = new_def
+                # Display Definition
+                st.write("**Definition**:")
+                st.write(curr_def if curr_def else "_No definition provided._")
                 
-                # Info Block
-                st.write(f"**Headword/Lemma**: {lemma}")
+                st.divider()
                 
-                display_forms = same_lemma_words[:20]
-                distinct_forms_str = ', '.join(display_forms)
-                if len(same_lemma_words) > 20:
-                    distinct_forms_str += f", ... (+{len(same_lemma_words)-20} more)"
-                st.write(f"**Words from same Lemma**: {distinct_forms_str}")
+                # Navigation Rows
+                render_clickable_word_row("Words from same Lemma", same_lemma_words)
+                related = search.get_related_words(query, limit=20)
+                render_clickable_word_row(f"Related Words (containing '{query}')", related)
                 
-                # Related Words (Regex/Infix match)
-                related = search.get_related_words(token, limit=20)
-                if related:
-                     st.write(f"**Related Words** (containing '{token}'): {', '.join(related)}")
+                # Form to Edit
+                render_sense_editor(query, tag, {
+                    "definition": curr_def,
+                    "pronunciation": pron,
+                    "frequency": freq
+                })
                 
                 st.write("**All POS Tags**:")
                 cols_pos = st.columns(len(all_pos_tags) if len(all_pos_tags) < 10 else 10)
@@ -205,8 +257,26 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
         # "Add Sense" Tab content
         with tabs[-1]:
             st.header("Add New Sense")
-            st.info("This feature allows you to define a new sense for the word manually.")
-            new_pos = st.text_input("POS Tag (e.g., NN, VB)")
-            new_def_manual = st.text_area("Definition")
-            if st.button("Save New Sense"):
-                 st.success(f"New sense for {query} ({new_pos}) saved! (Simulated)")
+            st.info("Manually define all fields for a new sense.")
+            
+            with st.form("new_sense_form"):
+                new_tag = st.text_input("POS Tag (e.g., NN, VB)")
+                new_pron = st.text_input("Pronunciation")
+                new_freq = st.number_input("Initial Frequency", value=0)
+                new_def_manual = st.text_area("Definition")
+                
+                submitted = st.form_submit_button("➕ Add Sense to Dictionary")
+                if submitted:
+                    if not new_tag:
+                        st.error("POS Tag is required.")
+                    else:
+                        if query not in st.session_state['overrides']:
+                            st.session_state['overrides'][query] = {}
+                        st.session_state['overrides'][query][new_tag] = {
+                            "pronunciation": new_pron,
+                            "frequency": new_freq,
+                            "definition": new_def_manual,
+                            "is_manual": True
+                        }
+                        st.success(f"New sense for {query} ({new_tag}) added!")
+                        st.rerun()
