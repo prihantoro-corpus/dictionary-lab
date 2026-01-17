@@ -63,7 +63,52 @@ def get_metadata_values(key, corpora=None):
         conn.close()
 
 def render():
-    st.sidebar.title("CORPUS")
+    st.sidebar.title("DICTIONARY EDITOR")
+    
+    # --- Persistence & Uploads ---
+    with st.sidebar.expander("📁 File Management", expanded=True):
+        # 1. Corpus Upload
+        uploaded_corpus = st.sidebar.file_uploader("Upload Corpus (vertical, XML, etc.)", type=None)
+        if uploaded_corpus:
+            with st.spinner("Ingesting corpus..."):
+                from pipeline import ingest
+                import tempfile
+                with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                    tmp.write(uploaded_corpus.getvalue())
+                    tmp_path = tmp.name
+                
+                parser = ingest.CorpusParser()
+                parser.ingest_file(tmp_path)
+                st.sidebar.success(f"Ingested {uploaded_corpus.name}")
+                st.cache_data.clear()
+                st.rerun()
+
+        # 2. Upload Changes (JSON)
+        uploaded_json = st.sidebar.file_uploader("Upload Changes (.json)", type=["json"])
+        if uploaded_json:
+            try:
+                import json
+                new_overrides = json.load(uploaded_json)
+                if 'overrides' not in st.session_state:
+                    st.session_state['overrides'] = {}
+                st.session_state['overrides'].update(new_overrides)
+                st.sidebar.success("Changes uploaded and merged!")
+            except Exception as e:
+                st.sidebar.error(f"Error loading JSON: {e}")
+
+        # 3. Save All Changes (Export)
+        if st.session_state.get('overrides'):
+            import json
+            json_data = json.dumps(st.session_state['overrides'], indent=2)
+            st.sidebar.download_button(
+                label="💾 Save All Changes (JSON)",
+                data=json_data,
+                file_name="dictionary_changes.json",
+                mime="application/json"
+            )
+
+    st.sidebar.divider()
+    st.sidebar.title("CORPUS SEARCH")
     
     available_corpora = get_corpora()
     
@@ -167,50 +212,6 @@ def render():
             
     where_clause = " AND ".join(where_parts)
     
-    st.sidebar.divider()
-    
-    # --- Persistence & Uploads ---
-    st.sidebar.subheader("File Management")
-    
-    # 1. Corpus Upload
-    uploaded_corpus = st.sidebar.file_uploader("Upload Corpus (vertical, XML, etc.)", type=None)
-    if uploaded_corpus:
-        with st.spinner("Ingesting corpus..."):
-            from pipeline import ingest
-            # Save to temporary file or read directly
-            import tempfile
-            with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                tmp.write(uploaded_corpus.getvalue())
-                tmp_path = tmp.name
-            
-            parser = ingest.CorpusParser()
-            parser.ingest_file(tmp_path)
-            st.sidebar.success(f"Ingested {uploaded_corpus.name}")
-            st.cache_data.clear() # Clear metadata/corpora cache
-            st.rerun()
-
-    # 2. Upload Changes (JSON)
-    uploaded_json = st.sidebar.file_uploader("Upload Changes (.json)", type=["json"])
-    if uploaded_json:
-        try:
-            import json
-            new_overrides = json.load(uploaded_json)
-            # Simple merge
-            st.session_state['overrides'].update(new_overrides)
-            st.sidebar.success("Changes uploaded and merged!")
-        except Exception as e:
-            st.sidebar.error(f"Error loading JSON: {e}")
-
-    # 3. Save All Changes (Export)
-    if st.session_state.get('overrides'):
-        import json
-        json_data = json.dumps(st.session_state['overrides'], indent=2)
-        st.sidebar.download_button(
-            label="💾 Save All Changes (JSON)",
-            data=json_data,
-            file_name="dictionary_changes.json",
-            mime="application/json"
-        )
     
     return {
         'where_clause': where_clause,
