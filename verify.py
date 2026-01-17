@@ -24,6 +24,14 @@ def run_verify():
     pos = search.get_pos_tags("apple")
     print(f"POS tags for 'apple': {pos}")
     
+    # Wordlist / CEFR
+    badges = manager.check_token("apple")
+    print(f"Badges for 'apple': {badges}")
+    if any(b['name'] == 'CEFR' for b in badges):
+        print("PASS CEFR Detection")
+    else:
+        print("FAIL CEFR Detection (Check if cefrpy is working)")
+
     # Related Words
     related = search.get_related_words("apple")
     print(f"Related words to 'apple': {related}")

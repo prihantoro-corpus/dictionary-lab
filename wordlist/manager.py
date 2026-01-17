@@ -28,6 +28,11 @@ def load_wordlists():
     
     for filename in os.listdir(WORDLIST_DIR):
         filepath = os.path.join(WORDLIST_DIR, filename)
+        
+        # SKIP DIRECTORIES (like __pycache__)
+        if not os.path.isfile(filepath):
+            continue
+            
         name = os.path.splitext(filename)[0].upper()
         
         try:
@@ -41,12 +46,14 @@ def load_wordlists():
                             entries[row[0].lower()] = row[1] # token -> level
                         elif len(row) == 1:
                             entries[row[0].lower()] = "yes"
-                else:
+                elif filename.endswith('.txt'):
                     # Assume text file one word per line
                      for line in f:
                          word = line.strip().lower()
                          if word:
                              entries[word] = "yes"
+                else:
+                    continue # Skip other types
             loaded[name] = entries
         except Exception as e:
             print(f"Failed to load {filename}: {e}")
@@ -74,19 +81,19 @@ def check_token(token):
     # Check CEFR (Library)
     if HAS_CEFR:
         try:
-            # Assuming cefrpy usage: CEFR().get_level(word) or similar.
-            # I will assume a static method or simple lookup.
-            # Checking documentation or assuming `CEFR().level(word)` returns list or string
+            # cefrpy usage: CEFR().level(word) -> list or None
             c = CEFR()
-            levels = c.level(token_lower) # Returns list usually e.g. ['A1', 'B2']
+            levels = c.level(token_lower) 
             if levels:
                 if isinstance(levels, list):
-                    val = ",".join(levels)
+                    # Filter out None/empty
+                    levels = [lvl for lvl in levels if lvl]
+                    if levels:
+                        val = ",".join(levels)
+                        badges.append({'name': 'CEFR', 'value': val})
                 else:
-                    val = str(levels)
-                badges.append({'name': 'CEFR (Lib)', 'value': val})
+                    badges.append({'name': 'CEFR', 'value': str(levels)})
         except Exception as e:
-            # Fallback or error
             pass
             
     return badges
