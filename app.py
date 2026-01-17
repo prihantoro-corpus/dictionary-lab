@@ -19,10 +19,16 @@ if 'db_initialized' not in st.session_state:
 # Main App Control
 def main():
     # Render Sidebar
-    where_clause, params = sidebar.render()
+    filters = sidebar.render()
 
     # Render Main View
-    main_view.render(where_clause, params)
+    # Pass the entire filters dict or unpack
+    main_view.render(
+        where_clause=filters['where_clause'], 
+        params=filters['params'],
+        stop_words=filters['stop_words'],
+        collocate_filter=filters['collocate_filter']
+    )
 
 if __name__ == "__main__":
     main()

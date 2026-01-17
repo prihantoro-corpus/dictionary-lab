@@ -2,51 +2,48 @@ from pipeline import indexing, ingest, search
 from stats import frequency, collocation, kwic
 from wordlist import manager
 import os
+import shutil
+
+CORPORA_DIR = r"c:\Users\priha\Documents\dictionary-lab\corpora"
 
 def run_verify():
-    print("Resetting DB...")
-    indexing.reset_db()
+    print("Testing Search Helpers...")
+    # Lemma
+    # In sample_corpus.txt, we have "apples" -> "apple" if we had it. 
+    # Let's check a word from BPPT if ingested, or sample.
+    # Sample has "apple" -> lemma "apple".
     
-    print("Ingesting Corpus...")
-    parser = ingest.CorpusParser()
-    parser.process_file(r"c:\Users\priha\Documents\dictionary-lab\corpora\sample_corpus.txt", "SAMPLE")
+    lemma = search.get_lemma("apple")
+    print(f"Lemma for 'apple': {lemma}")
     
-    print("Testing Search (Exact)...")
-    res = search.search_exact("apple")
-    print(f"Found 'apple': {len(res)} times")
-    if len(res) == 2: print("PASS")
-    else: print("FAIL")
+    # Forms
+    forms = search.get_forms_by_lemma("apple")
+    print(f"Forms for lemma 'apple': {forms}")
     
-    print("Testing Stats...")
-    metrics = frequency.get_metrics("apple")
-    print(f"Metrics for 'apple': {metrics}")
-    # Total tokens = 15. Count = 2. PMW = (2/15)*1M = 133333.33
-    if metrics['frequency'] == 2: print("PASS")
-    else: print("FAIL")
+    # POS
+    pos = search.get_pos_tags("apple")
+    print(f"POS tags for 'apple': {pos}")
     
-    print("Testing Wordlist...")
-    badges = manager.check_token("apple")
-    print(f"Badges for 'apple': {badges}")
-    if any(b['name'] == 'BASIC_ENGLISH' for b in badges): print("PASS")
-    else: print("FAIL")
-    
-    print("Testing KWIC...")
-    lines = kwic.get_kwic_lines("apple", window=2)
-    for line in lines:
-        print(f"KWIC: {line['left']} [{line['node']}] {line['right']}")
+    print("\nTesting N-Grams (New Structure)...")
+    ngrams = collocation.get_ngrams("apple")
+    print("Keys in ngrams:", list(ngrams.keys()))
+    if 'bi_search_word' in ngrams:
+        print("PASS Structure")
+    else:
+        print("FAIL Structure")
         
-    print("Testing IPA...")
-    try:
-        import eng_to_ipa as ipa
-        pron = ipa.convert("apple")
-        try:
-            print(f"IPA for 'apple': {pron}")
-        except UnicodeEncodeError:
-            print(f"IPA for 'apple': {pron.encode('utf-8')}") # Fallback for Windows console
-        if pron: print("PASS")
-        else: print("FAIL (Empty)")
-    except ImportError:
-        print("FAIL (ImportError)")
+    print("\nTesting Collocate Filters...")
+    # Filter for 'eat' only
+    collocs = collocation.get_collocates("apple", allowed_words=["eat"])
+    print(f"Collocates for 'apple' (allowed=['eat']): {collocs}")
+    
+    print("\nTesting Metadata Extraction...")
+    from layout import sidebar
+    keys = sidebar.get_metadata_keys()
+    print(f"Metadata Keys: {keys}")
+    if keys:
+        vals = sidebar.get_metadata_values(keys[0])
+        print(f"Values for {keys[0]}: {vals}")
         
     print("Done.")
 

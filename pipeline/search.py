@@ -1,49 +1,66 @@
 import duckdb
-from .indexing import get_connection
+from pipeline.indexing import get_connection
+import Levenshtein
 
-def autocomplete(query, limit=10):
-    """Returns a list of suggested tokens based on prefix."""
+def autocomplete(prefix, limit=10):
     conn = get_connection()
-    # ILIKE for case-insensitive
-    # Group by token to avoid duplicates in suggestion
-    query_str = f"{query}%"
-    results = conn.execute("""
-        SELECT DISTINCT token 
-        FROM tokens 
-        WHERE token ILIKE ? 
-        LIMIT ?
-    """, (query_str, limit)).fetchall()
+    # optimized prefix search
+    query = "SELECT DISTINCT token FROM tokens WHERE token ILIKE ? LIMIT ?"
+    res = conn.execute(query, (f"{prefix}%", limit)).fetchall()
     conn.close()
-    return [r[0] for r in results]
+    return [r[0] for r in res]
 
-def search_exact(query):
-    """Returns all occurrences of a token exactly matching the query."""
+def search_exact(token):
     conn = get_connection()
-    results = conn.execute("""
-        SELECT * 
-        FROM tokens 
-        WHERE token = ?
-    """, (query,)).fetchall()
-    # Convert to list of dicts ? Or dataframe? 
-    # For now, return raw rows, handling in app logic likely better with DF
-    df = conn.execute("""
-        SELECT * 
-        FROM tokens 
-        WHERE token = ?
-    """, (query,)).df()
+    # Return dataframe of all entries
+    query = "SELECT * FROM tokens WHERE token = ?"
+    df = conn.execute(query, (token,)).fetchdf()
     conn.close()
     return df
 
-def search_fuzzy(query, limit=50):
-    """Returns tokens similar to the query using Levenshtein distance."""
+def search_fuzzy(token, limit=5):
     conn = get_connection()
-    # DuckDB has levenshtein function
-    results = conn.execute("""
-        SELECT DISTINCT token, levenshtein(token, ?) as dist
-        FROM tokens 
-        WHERE dist < 3
-        ORDER BY dist ASC
-        LIMIT ?
-    """, (query, limit)).fetchall()
+    # Get all unique tokens (expensive if large, maybe limit?)
+    # For MVP: Select distinct tokens
+    all_tokens_res = conn.execute("SELECT DISTINCT token FROM tokens").fetchall()
+    all_tokens = [r[0] for r in all_tokens_res]
     conn.close()
-    return [r[0] for r in results]
+    
+    # Calculate distance
+    # Filter close matches
+    matches = []
+    for t in all_tokens:
+        dist = Levenshtein.distance(token.lower(), t.lower())
+        if dist <= 2 and dist > 0: # 0 is exact
+            matches.append((t, dist))
+            
+    matches.sort(key=lambda x: x[1])
+    return [m[0] for m in matches[:limit]]
+
+def get_lemma(token):
+    """Returns the most frequent lemma for this token."""
+    conn = get_connection()
+    res = conn.execute("""
+        SELECT lemma, COUNT(*) as c 
+        FROM tokens 
+        WHERE token = ? 
+        GROUP BY lemma 
+        ORDER BY c DESC 
+        LIMIT 1
+    """, (token,)).fetchone()
+    conn.close()
+    return res[0] if res else token
+
+def get_forms_by_lemma(lemma):
+    """Returns all tokens that share this lemma."""
+    conn = get_connection()
+    res = conn.execute("SELECT DISTINCT token FROM tokens WHERE lemma = ?", (lemma,)).fetchall()
+    conn.close()
+    return [r[0] for r in res]
+
+def get_pos_tags(token):
+    """Returns all unique POS tags for this token."""
+    conn = get_connection()
+    res = conn.execute("SELECT DISTINCT tag FROM tokens WHERE token = ?", (token,)).fetchall()
+    conn.close()
+    return [r[0] for r in res]

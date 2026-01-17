@@ -2,88 +2,120 @@ import duckdb
 import math
 from pipeline.indexing import get_connection
 
-def get_ngrams(token, n=2, limit=10, where_clause="1=1", params=()):
-    """
-    Returns top N-grams containing the token.
-    Direction: Forward and Backward? 
-    User req: "word search_word", "search_word word".
-    """
+def get_ngrams(token, limit=10, where_clause="1=1", params=()):
     conn = get_connection()
-    
-    # We can use window functions to generate n-grams on the fly or joining.
-    # Generating on fly might be slow if scanning whole table.
-    # Better to filter by token first then look around.
-    
-    # Simple approach: Find token ID, get adjacent words.
-    
     results = {}
     
-    # Bigrams: Forward (SearchWord + Word)
-    fw = conn.execute(f"""
-        WITH matches AS (
-            SELECT id, file_id FROM tokens WHERE token = ? AND {where_clause}
-        ),
+    # Common CTE for matches
+    cte_matches = f"matches AS (SELECT id, file_id FROM tokens WHERE token = ? AND {where_clause})"
+    
+    # 1. Bigram: Search + Word (Forward)
+    results['bi_search_word'] = conn.execute(f"""
+        WITH {cte_matches},
         next_tokens AS (
+            SELECT t2.token as w2
+            FROM matches m
+            JOIN tokens t2 ON m.id + 1 = t2.id AND m.file_id = t2.file_id
+        )
+        SELECT ? || ' ' || w2, COUNT(*) as freq
+        FROM next_tokens
+        GROUP BY w2
+        ORDER BY freq DESC LIMIT ?
+    """, (token, token, limit)).fetchall()
+    
+    # 2. Bigram: Word + Search (Backward)
+    results['bi_word_search'] = conn.execute(f"""
+        WITH {cte_matches},
+        prev_tokens AS (
+            SELECT t0.token as w0
+            FROM matches m
+            JOIN tokens t0 ON m.id - 1 = t0.id AND m.file_id = t0.file_id
+        )
+        SELECT w0 || ' ' || ?, COUNT(*) as freq
+        FROM prev_tokens
+        GROUP BY w0
+        ORDER BY freq DESC LIMIT ?
+    """, (token, token, limit)).fetchall()
+    
+    # 3. Trigram: Search + Word + Word (s w w)
+    results['tri_s_w_w'] = conn.execute(f"""
+        WITH {cte_matches},
+        next2 AS (
             SELECT t1.token as w1, t2.token as w2
             FROM matches m
-            JOIN tokens t1 ON m.id = t1.id
-            JOIN tokens t2 ON m.id + 1 = t2.id AND t1.file_id = t2.file_id
+            JOIN tokens t1 ON m.id + 1 = t1.id AND m.file_id = t1.file_id
+            JOIN tokens t2 ON m.id + 2 = t2.id AND m.file_id = t2.file_id
         )
-        SELECT w1 || ' ' || w2 as bigram, COUNT(*) as freq
-        FROM next_tokens
-        GROUP BY bigram
-        ORDER BY freq DESC
-        LIMIT ?
-    """, (token, *params, limit)).fetchall()
+        SELECT ? || ' ' || w1 || ' ' || w2, COUNT(*) as freq
+        FROM next2
+        GROUP BY w1, w2
+        ORDER BY freq DESC LIMIT ?
+    """, (token, token, limit)).fetchall()
     
-    results['forward_bigrams'] = fw
-    
-    # Bigrams: Backward (Word + SearchWord)
-    bw = conn.execute(f"""
-        WITH matches AS (
-            SELECT id, file_id FROM tokens WHERE token = ? AND {where_clause}
-        ),
-        prev_tokens AS (
+    # 4. Trigram: Word + Search + Word (w s w)
+    results['tri_w_s_w'] = conn.execute(f"""
+        WITH {cte_matches},
+        surround AS (
+            SELECT t0.token as w0, t2.token as w2
+            FROM matches m
+            JOIN tokens t0 ON m.id - 1 = t0.id AND m.file_id = t0.file_id
+            JOIN tokens t2 ON m.id + 1 = t2.id AND m.file_id = t2.file_id
+        )
+        SELECT w0 || ' ' || ? || ' ' || w2, COUNT(*) as freq
+        FROM surround
+        GROUP BY w0, w2
+        ORDER BY freq DESC LIMIT ?
+    """, (token, token, limit)).fetchall()
+
+    # 5. Trigram: Word + Word + Search (w w s)
+    results['tri_w_w_s'] = conn.execute(f"""
+        WITH {cte_matches},
+        prev2 AS (
             SELECT t0.token as w0, t1.token as w1
             FROM matches m
-            JOIN tokens t1 ON m.id = t1.id
-            JOIN tokens t0 ON m.id - 1 = t0.id AND t1.file_id = t0.file_id
+            JOIN tokens t0 ON m.id - 2 = t0.id AND m.file_id = t0.file_id
+            JOIN tokens t1 ON m.id - 1 = t1.id AND m.file_id = t1.file_id
         )
-        SELECT w0 || ' ' || w1 as bigram, COUNT(*) as freq
-        FROM prev_tokens
-        GROUP BY bigram
-        ORDER BY freq DESC
-        LIMIT ?
-    """, (token, *params, limit)).fetchall()
-    
-    results['backward_bigrams'] = bw
-    
-    # TODO: Trigrams (similar pattern)
+        SELECT w0 || ' ' || w1 || ' ' || ?, COUNT(*) as freq
+        FROM prev2
+        GROUP BY w0, w1
+        ORDER BY freq DESC LIMIT ?
+    """, (token, token, limit)).fetchall()
     
     conn.close()
     return results
 
-def get_collocates(token, window=5, limit=20, where_clause="1=1", params=()):
-    """
-    Calculates top collocates using Log-Likelihood.
-    """
+def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), stop_words=None, allowed_words=None):
     conn = get_connection()
+    if stop_words is None: stop_words = []
+    if allowed_words is None: allowed_words = []
     
-    # 1. Total tokens (N)
-    N = conn.execute(f"SELECT COUNT(*) FROM tokens WHERE {where_clause}", params).fetchone()[0]
+    # Prepare Filters
+    # Allowed words: If present, only look for these.
+    # Stop words: Exclude these.
     
-    if N == 0: return []
+    filter_sql = ""
+    filter_params = []
+    
+    if allowed_words:
+        # If allowed words list is huge, this is inefficient. Assuming user types a few.
+        placeholders = ",".join(["?"] * len(allowed_words))
+        filter_sql += f" AND t2.token IN ({placeholders})"
+        filter_params.extend(allowed_words)
+    
+    if stop_words:
+        placeholders = ",".join(["?"] * len(stop_words))
+        filter_sql += f" AND t2.token NOT IN ({placeholders})"
+        filter_params.extend(stop_words)
 
-    # 2. Count of Node (NodeFreq)
+    N = conn.execute(f"SELECT COUNT(*) FROM tokens WHERE {where_clause}", params).fetchone()[0]
+    if N == 0: return []
+    
     node_freq = conn.execute(f"SELECT COUNT(*) FROM tokens WHERE token = ? AND {where_clause}", (token, *params)).fetchone()[0]
+    if node_freq == 0: return []
     
-    # 3. Find co-occurrences (O11)
-    # This is expensive. Optimize by filtering only relevant IDs.
-    
-    # Get IDs of node
-    # Then range join?
-    # Or self-join: t1=node, t2=collocate, abs(t1.id - t2.id) <= window
-    
+    # Calculate Co-occurrences
+    # Combining the node query and collocate filter
     collocan_counts = conn.execute(f"""
         WITH node_ids AS (
             SELECT id, file_id FROM tokens WHERE token = ? AND {where_clause}
@@ -93,38 +125,28 @@ def get_collocates(token, window=5, limit=20, where_clause="1=1", params=()):
         JOIN tokens t2 ON t2.file_id = n.file_id 
             AND t2.id BETWEEN n.id - ? AND n.id + ?
             AND t2.id != n.id
-        WHERE {where_clause}
+        WHERE {where_clause} {filter_sql}
         GROUP BY t2.token
         ORDER BY O11 DESC
-        LIMIT 100 
-    """, (token, *params, window, window, *params)).fetchall()
+        LIMIT 200 
+    """, (token, *params, *filter_params, window, window, *params)).fetchall()
     
     results = []
     for collocate, O11 in collocan_counts:
-        # 4. Count of Collocate (ColFreq)
         col_freq = conn.execute(f"SELECT COUNT(*) FROM tokens WHERE token = ? AND {where_clause}", (collocate, *params)).fetchone()[0]
         
-        # Log-Likelihood Calc
-        # E11 = (NodeFreq * ColFreq) / N
         try:
+            # Simple Log Likelihood approximation
             E11 = (node_freq * col_freq) / N
             if E11 == 0: continue
-            
-            # Simple LL formula (Dunning): 2 * (O11 * ln(O11/E11)) ... (simplified, needs 4 cells for accuracy)
-            # Full formula:
-            # L = 2 * (O11 * log(O11/E11) + O12 * log(O12/E12) + O21 * log(O21/E21) + O22 * log(O22/E22))
-            
-            # For efficiency/simplicity here, keeping it basic or use a library if available.
-            # Let's approximate roughly or just return Frequency + MI?
-            # User specifically asked for Log-Likelihood.
             
             def safe_x_log_x_y(x, y):
                 if x == 0 or y == 0: return 0
                 return x * math.log(x / y)
-
+            
             O12 = node_freq - O11
             O21 = col_freq - O11
-            O22 = N - (node_freq + col_freq - O11) # approx N
+            O22 = N - (node_freq + col_freq - O11)
             
             E12 = (node_freq * (N - col_freq)) / N
             E21 = ((N - node_freq) * col_freq) / N
@@ -135,15 +157,10 @@ def get_collocates(token, window=5, limit=20, where_clause="1=1", params=()):
                       safe_x_log_x_y(O21, E21) + 
                       safe_x_log_x_y(O22, E22))
             
-            results.append({
-                'collocate': collocate,
-                'freq': O11,
-                'score': LL
-            })
+            results.append({'collocate': collocate, 'freq': O11, 'score': LL})
         except:
             continue
             
-    # Sort by Score
     results.sort(key=lambda x: x['score'], reverse=True)
     conn.close()
     return results[:limit]

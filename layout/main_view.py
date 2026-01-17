@@ -2,17 +2,17 @@
 import streamlit as st
 import pandas as pd
 import eng_to_ipa as ipa
+import json
 from pipeline import search
 from stats import frequency, collocation, kwic
 from wordlist import manager
 from layout import components
 
-def render(where_clause="1=1", params=()):
-    st.title("Dictionary Search")
+def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None):
+    if stop_words is None: stop_words = []
+    if collocate_filter is None: collocate_filter = []
     
-    # Search Box
-    # Simple Text Input for now. 
-    # For "Autocomplete", we can show a selectbox of suggestions if query is typed
+    st.title("Dictionary Search")
     
     # Session state for query
     if 'query' not in st.session_state:
@@ -21,7 +21,7 @@ def render(where_clause="1=1", params=()):
     query = st.text_input("Search word:", value=st.session_state.query)
     
     if query:
-        # Autocomplete / Suggestions
+        # Autocomplete
         suggestions = search.autocomplete(query)
         if suggestions and query not in suggestions:
              cols = st.columns(len(suggestions) if len(suggestions) < 5 else 5)
@@ -35,7 +35,6 @@ def render(where_clause="1=1", params=()):
         
         if df.empty:
             st.warning("No exact match found.")
-            # Fuzzy
             fuzzy_tokens = search.search_fuzzy(query)
             if fuzzy_tokens:
                 st.write("Did you mean:")
@@ -45,22 +44,26 @@ def render(where_clause="1=1", params=()):
                         st.experimental_rerun()
             return
             
-        # Group by POS (Tag) -> Senses
-        # Different corpora might use different tagsets, but we group by the 'tag' column.
-        # Use pandas grouping
+        # Group by POS
         grouped = df.groupby('tag')
         
-        tabs = st.tabs([f"Sense: {tag}" for tag in grouped.groups.keys()])
+        # Sense Tabs + Add Sense
+        sense_labels = [f"Sense: {tag}" for tag in grouped.groups.keys()]
+        sense_labels.append("➕ Add Sense")
         
+        tabs = st.tabs(sense_labels)
+        
+        # Pre-fetch common data
+        lemma = search.get_lemma(query)
+        same_lemma_words = search.get_forms_by_lemma(lemma)
+        all_pos_tags = search.get_pos_tags(query)
+        
+        # Render existing senses
         for i, (tag, group_df) in enumerate(grouped):
             with tabs[i]:
-                # Take the first entry as representative for lemma/headword (or aggregated?)
-                # Usually same token + same tag = same lemma.
-                rep = group_df.iloc[0]
-                token = rep['token']
-                lemma = rep['lemma']
+                token = query # or group_df.iloc[0]['token']
                 
-                # Stats (Calculated on the fly based on filters)
+                # Metrics
                 metrics = frequency.get_metrics(token, where_clause, params)
                 
                 # Header
@@ -75,61 +78,108 @@ def render(where_clause="1=1", params=()):
                 with c4:
                     components.render_zipf_band(metrics['zipf'])
                     
-                # PMW Bar
                 components.render_pmw_bar(metrics['pmw'])
                 
                 st.divider()
                 
-                # Definition (Editable - Mock saving)
+                # Definition
                 def_key = f"def_{token}_{tag}"
                 curr_def = st.session_state.get(def_key, "")
                 new_def = st.text_area("Definition", value=curr_def, key=f"input_{def_key}")
                 if new_def != curr_def:
                     st.session_state[def_key] = new_def
-                    # Save mechanism would go here (update JSON)
                 
-                # Metadata / Lemma info
-                st.write(f"**Lemma**: {lemma}")
+                # Info Block
+                st.write(f"**Headword/Lemma**: {lemma}")
+                st.write(f"**Words from same Lemma**: {', '.join(same_lemma_words)}")
                 
-                # Wordlist Badges
+                st.write("**All POS Tags**:")
+                cols_pos = st.columns(len(all_pos_tags) if len(all_pos_tags) < 10 else 10)
+                for j, p in enumerate(all_pos_tags):
+                    with cols_pos[j % 10]:
+                        st.caption(p) # Simple badge
+
+                # Wordlists
                 wl_badges = manager.check_token(token)
                 if wl_badges:
                     st.write("**Wordlists**:")
-                    cols = st.columns(len(wl_badges) if len(wl_badges) < 6 else 6)
-                    for i, b in enumerate(wl_badges):
-                        with cols[i % 6]:
+                    cols_wl = st.columns(len(wl_badges) if len(wl_badges) < 6 else 6)
+                    for j, b in enumerate(wl_badges):
+                        with cols_wl[j % 6]:
                             components.render_badge(f"{b['name']}={b['value']}", type="wordlist")
                 
-                # Associated Words (Simulated)
-                st.write("**Related Words**: "+ ", ".join(search.autocomplete(lemma, limit=5)))
+                # External Links
+                st.write("**External Links**:")
+                st.markdown(f"[Collins Dictionary](https://www.collinsdictionary.com/dictionary/english/{token}) | [Collins Thesaurus](https://www.collinsdictionary.com/dictionary/english-thesaurus/{token})")
                 
                 st.divider()
                 
                 # N-Grams
                 ngrams = collocation.get_ngrams(token, where_clause=where_clause, params=params)
-                c_bi, c_tri = st.columns(2)
-                with c_bi:
-                    st.subheader("Top Bigrams")
-                    st.table(pd.DataFrame(ngrams['forward_bigrams'], columns=['Bigram', 'Freq']).head(5))
-                with c_tri:
-                    st.subheader("Top-5 Collocates (Log-Likelihood)")
-                    collocs = collocation.get_collocates(token, where_clause=where_clause, params=params)
-                    st.table(pd.DataFrame(collocs).head(5))
-                    
+                
+                st.subheader("Bigrams")
+                b1, b2 = st.columns(2)
+                with b1:
+                    st.markdown(f"**{token} + Word**")
+                    st.table(pd.DataFrame(ngrams['bi_search_word'], columns=['Bigram', 'Freq']).head(5))
+                with b2:
+                    st.markdown(f"**Word + {token}**")
+                    st.table(pd.DataFrame(ngrams['bi_word_search'], columns=['Bigram', 'Freq']).head(5))
+
+                st.subheader("Trigrams")
+                t1, t2, t3 = st.columns(3)
+                with t1:
+                    st.markdown(f"**{token} + W + W**")
+                    st.table(pd.DataFrame(ngrams['tri_s_w_w'], columns=['Trigram', 'Freq']).head(5))
+                with t2:
+                    st.markdown(f"**W + {token} + W**")
+                    st.table(pd.DataFrame(ngrams['tri_w_s_w'], columns=['Trigram', 'Freq']).head(5))
+                with t3:
+                    st.markdown(f"**W + W + {token}**")
+                    st.table(pd.DataFrame(ngrams['tri_w_w_s'], columns=['Trigram', 'Freq']).head(5))
+                
+                # Collocates
+                st.subheader("Top-20 Collocates (Log-Likelihood)")
+                collocs = collocation.get_collocates(token, limit=20, where_clause=where_clause, params=params, stop_words=stop_words, allowed_words=collocate_filter)
+                st.dataframe(pd.DataFrame(collocs)) # dataframe better for larger lists
+                
                 st.divider()
                 
-                # Examples (KWIC)
+                # KWIC
                 st.subheader("Examples (KWIC)")
                 kwic_lines = kwic.get_kwic_lines(token, where_clause=where_clause, params=params, limit=10)
-                
                 for line in kwic_lines:
-                    # Simple KWIC display: RIGHT ALIGN left context, BOLD node, LEFT ALIGN right context
-                    # Streamlit columns alignment is tricky. Using markdown table or HTML.
-                    
-                    st.markdown(f"""
+                     st.markdown(f"""
                     <div style="display: flex; justify-content: center; font-family: monospace;">
                         <span style="text-align: right; width: 45%; margin-right: 10px;">{line['left']}</span>
                         <span style="font-weight: bold; color: red;">{line['node']}</span>
                         <span style="text-align: left; width: 45%; margin-left: 10px;">{line['right']}</span>
                     </div>
                     """, unsafe_allow_html=True)
+                
+                # Save Button
+                st.divider()
+                export_data = {
+                    "token": token,
+                    "tag": tag,
+                    "definition": new_def,
+                    "metrics": metrics,
+                    "collocates": collocs,
+                    "examples": kwic_lines
+                }
+                json_str = json.dumps(export_data, indent=2)
+                st.download_button(
+                    label="💾 Save Entry to JSON",
+                    data=json_str,
+                    file_name=f"{token}_{tag}_entry.json",
+                    mime="application/json"
+                )
+
+        # "Add Sense" Tab content
+        with tabs[-1]:
+            st.header("Add New Sense")
+            st.info("This feature allows you to define a new sense for the word manually.")
+            new_pos = st.text_input("POS Tag (e.g., NN, VB)")
+            new_def_manual = st.text_area("Definition")
+            if st.button("Save New Sense"):
+                 st.success(f"New sense for {query} ({new_pos}) saved! (Simulated)")
