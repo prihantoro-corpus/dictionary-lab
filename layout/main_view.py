@@ -171,6 +171,19 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                     </div>
                     """, unsafe_allow_html=True)
                 
+                # Collocate Examples
+                st.subheader("Examples by Collocates")
+                # Pick top 3 collocates for examples
+                top_collocs = [c['collocate'] for c in collocs[:3]]
+                for col_word in top_collocs:
+                    with st.expander(f"Usage with '{col_word}'", expanded=True):
+                        col_examples = kwic.get_collocate_kwic(token, col_word, where_clause=where_clause, params=params, limit=3)
+                        if col_examples:
+                            for ex in col_examples:
+                                components.render_collocate_example(ex['left'], ex['node'], ex['right'], ex['col_token'])
+                        else:
+                            st.caption("No specific examples found for this pair.")
+                
                 # Save Button
                 st.divider()
                 export_data = {

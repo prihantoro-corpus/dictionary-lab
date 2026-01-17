@@ -29,3 +29,20 @@ def render_zipf_band(band):
 def render_badge(text, type="corpus"):
     color = "blue" if type == "corpus" else "green"
     st.markdown(f":{color}[{text}]")
+
+def render_collocate_example(left_list, node, right_list, col_token):
+    """
+    Renders a sentence with search word and collocate highlighted.
+    """
+    def highlight(t):
+        if t.lower() == node.lower():
+            return f"<span style='color: #ff4b4b; font-weight: bold;'>{t}</span>"
+        if t.lower() == col_token.lower():
+            return f"<span style='color: #29b5e8; font-weight: bold;'>{t}</span>"
+        return t
+        
+    l_str = " ".join([highlight(t) for t in left_list])
+    r_str = " ".join([highlight(t) for t in right_list])
+    n_str = highlight(node)
+    
+    st.markdown(f"{l_str} {n_str} {r_str}", unsafe_allow_html=True)

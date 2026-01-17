@@ -36,6 +36,18 @@ def run_verify():
     related = search.get_related_words("apple")
     print(f"Related words to 'apple': {related}")
 
+    print("\nTesting KWIC Helpers...")
+    kwic_res = kwic.get_kwic_lines("apple", limit=5)
+    print(f"KWIC lines for 'apple': {len(kwic_res)}")
+    
+    col_kwic = kwic.get_collocate_kwic("apple", "eat", limit=5)
+    print(f"Collocate KWIC (apple+eat): {len(col_kwic)}")
+    if len(col_kwic) > 0:
+        print("PASS Collocate KWIC")
+    else:
+        # Check sample_corpus.txt to see if apple and eat are close
+        print("FAIL Collocate KWIC (Check co-occurrence in corpus)")
+
     print("\nTesting N-Grams (New Structure)...")
     # This should now work without exception even with filters (passed as params to get_ngrams, though verify script might default params)
     # The verify script calls get_ngrams("apple") -> params=().
