@@ -173,13 +173,13 @@ def render():
     st.sidebar.subheader("File Management")
     
     # 1. Corpus Upload
-    uploaded_corpus = st.sidebar.file_uploader("Upload Corpus (.txt)", type=["txt"])
+    uploaded_corpus = st.sidebar.file_uploader("Upload Corpus (vertical, XML, etc.)", type=None)
     if uploaded_corpus:
         with st.spinner("Ingesting corpus..."):
             from pipeline import ingest
             # Save to temporary file or read directly
             import tempfile
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as tmp:
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
                 tmp.write(uploaded_corpus.getvalue())
                 tmp_path = tmp.name
             
