@@ -74,13 +74,20 @@ def render():
                 with st.spinner("Ingesting corpus..."):
                     from pipeline import ingest
                     import tempfile
-                    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                        tmp.write(uploaded_corpus.getvalue())
-                        tmp_path = tmp.name
+                    import os
+                    # Use a context manager that we explicitly close and delete
+                    tmp_fd, tmp_path = tempfile.mkstemp()
+                    try:
+                        with os.fdopen(tmp_fd, 'wb') as tmp:
+                            tmp.write(uploaded_corpus.getvalue())
+                        
+                        parser = ingest.CorpusParser()
+                        parser.ingest_file(tmp_path)
+                        st.sidebar.success(f"Ingested {uploaded_corpus.name}")
+                    finally:
+                        if os.path.exists(tmp_path):
+                            os.remove(tmp_path)
                     
-                    parser = ingest.CorpusParser()
-                    parser.ingest_file(tmp_path)
-                    st.sidebar.success(f"Ingested {uploaded_corpus.name}")
                     st.cache_data.clear()
                     st.rerun()
 
@@ -109,6 +116,19 @@ def render():
                 file_name="dictionary_changes.json",
                 mime="application/json"
             )
+        
+        st.sidebar.divider()
+        # 4. Clear Database (Reset)
+        if st.sidebar.button("🗑️ Clear All Corpus Data", help="Delete all tokens from the database. This does NOT affect your saved overrides."):
+            from pipeline.indexing import get_connection
+            conn = get_connection()
+            try:
+                conn.execute("DELETE FROM tokens")
+                st.sidebar.warning("Database cleared!")
+                st.cache_data.clear()
+                st.rerun()
+            finally:
+                conn.close()
 
     st.sidebar.divider()
     st.sidebar.title("CORPUS SEARCH")
