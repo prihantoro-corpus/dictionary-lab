@@ -110,13 +110,15 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                         st.caption(p) # Simple badge
 
                 # Wordlists
+                st.write("**Wordlists / CEFR**:")
                 wl_badges = manager.check_token(token)
                 if wl_badges:
-                    st.write("**Wordlists**:")
                     cols_wl = st.columns(len(wl_badges) if len(wl_badges) < 6 else 6)
                     for j, b in enumerate(wl_badges):
                         with cols_wl[j % 6]:
                             components.render_badge(f"{b['name']}={b['value']}", type="wordlist")
+                else:
+                    st.caption("No external wordlist available for this token.")
                 
                 # External Links
                 st.write("**External Links**:")

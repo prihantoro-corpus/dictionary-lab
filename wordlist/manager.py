@@ -3,7 +3,7 @@ import csv
 
 # Try importing cefrpy
 try:
-    from cefrpy import CEFR
+    from cefrpy import CEFRAnalyzer
     HAS_CEFR = True
 except ImportError:
     HAS_CEFR = False
@@ -81,18 +81,14 @@ def check_token(token):
     # Check CEFR (Library)
     if HAS_CEFR:
         try:
-            # cefrpy usage: CEFR().level(word) -> list or None
-            c = CEFR()
-            levels = c.level(token_lower) 
-            if levels:
-                if isinstance(levels, list):
-                    # Filter out None/empty
-                    levels = [lvl for lvl in levels if lvl]
-                    if levels:
-                        val = ",".join(levels)
-                        badges.append({'name': 'CEFR', 'value': val})
-                else:
-                    badges.append({'name': 'CEFR', 'value': str(levels)})
+            # cefrpy usage: CEFRAnalyzer().get_pos_level_dict_for_word(word)
+            analyzer = CEFRAnalyzer()
+            res_dict = analyzer.get_pos_level_dict_for_word(token_lower)
+            if res_dict:
+                # Extract unique level names (A1, B2, etc.)
+                levels = sorted(list(set([lvl.name for lvl in res_dict.values()])))
+                if levels:
+                    badges.append({'name': 'CEFR', 'value': ",".join(levels)})
         except Exception as e:
             pass
             
