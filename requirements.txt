@@ -1,4 +1,8 @@
 streamlit
+duckdb
 pandas
 openpyxl
 matplotlib
+scikit-learn
+cefrpy
+eng-to-ipa

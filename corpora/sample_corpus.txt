@@ -1,0 +1,17 @@
+<text domain="test" year="2020">
+apple	NN	apple
+apples	NNS	apple
+I	PP	I
+eat	VB	eat
+an	DT	an
+apple	NN	apple
+.	SENT	.
+<text domain="economy" year="2021">
+bank	NN	bank
+banks	NNS	bank
+money	NN	money
+I	PP	I
+go	VB	go
+to	TO	to
+bank	NN	bank
+.	SENT	.
