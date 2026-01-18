@@ -21,15 +21,17 @@ class CorpusParser:
             attrs = dict(self.attr_pattern.findall(line))
             return 'metadata', attrs
         else:
-            # It's a token line
-            parts = [p.strip() for p in line.split('\t')]
+            # It's a token line (split by tabs or multiple spaces)
+            parts = [p.strip() for p in re.split(r'\t+', line) if p.strip()]
+            if not parts:
+                return None, None
+                
             if len(parts) >= 3:
                 return 'token', {'token': parts[0], 'tag': parts[1], 'lemma': parts[2]}
-            elif len(parts) == 1:
-                 # robust fallback
-                 return 'token', {'token': parts[0], 'tag': 'UNK', 'lemma': parts[0]}
+            elif len(parts) == 2:
+                 return 'token', {'token': parts[0], 'tag': parts[1], 'lemma': parts[0]}
             else:
-                 return 'token', {'token': parts[0], 'tag': parts[1] if len(parts)>1 else 'UNK', 'lemma': parts[2] if len(parts)>2 else parts[0]}
+                 return 'token', {'token': parts[0], 'tag': 'UNK', 'lemma': parts[0]}
 
     def ingest_file(self, filepath):
         """Simplifies ingestion by using filename as corpus name."""
@@ -40,6 +42,16 @@ class CorpusParser:
     def process_file(self, filepath, corpus_name):
         conn, is_shared = get_connection()
         try:
+            # Sanity Check: If file looks like a JSON dictionary, warn
+            with open(filepath, 'r', encoding='utf-8', errors='replace') as test_f:
+                head = test_f.read(100).strip()
+                if head.startswith('{') or head.startswith('['):
+                    print("WARNING: This file looks like JSON. Are you sure it's a corpus file (vertical text)?")
+
+            # Idempotency: Remove existing data for this corpus name if it exists
+            print(f"Clearing existing data for corpus '{corpus_name}'...")
+            safe_execute(conn, "DELETE FROM tokens WHERE corpus = ?", (corpus_name,))
+            
             # Get current max ID to continue sequence
             try:
                  res = safe_execute(conn, "SELECT MAX(id) FROM tokens").fetchone()
@@ -93,7 +105,7 @@ class CorpusParser:
             df = pd.DataFrame(data)
             # Register the dataframe with a fixed name to avoid scoping issues in safe_execute
             conn.register("batch_df", df)
-            safe_execute(conn, "INSERT INTO tokens SELECT * FROM batch_df")
+            safe_execute(conn, "INSERT INTO tokens (id, token, tag, lemma, corpus, metadata, file_id) SELECT id, token, tag, lemma, corpus, metadata, file_id FROM batch_df")
             conn.unregister("batch_df")
         except Exception as e:
             print(f"Bulk insert failed: {e}")

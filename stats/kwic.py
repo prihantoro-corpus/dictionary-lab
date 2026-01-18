@@ -11,6 +11,7 @@ def get_kwic_lines(token, window=7, limit=50, where_clause="1=1", params=()):
         SELECT id, file_id 
         FROM tokens 
         WHERE token ILIKE ? AND {where_clause} 
+        ORDER BY id
         LIMIT ?
     """, (token, *params, limit)).fetchall()
     
@@ -63,6 +64,7 @@ def get_collocate_kwic(token, collocate, window=7, limit=5, where_clause="1=1", 
         FROM (SELECT id, file_id, token FROM tokens WHERE {where_clause}) t1
         JOIN tokens t2 ON t1.file_id = t2.file_id AND t2.id BETWEEN t1.id - ? AND t1.id + ? AND t1.id != t2.id
         WHERE t1.token ILIKE ? AND t2.token ILIKE ?
+        ORDER BY t1.id
         LIMIT ?
     """
     matches = safe_execute(conn, query, (*params, window, window, token, collocate, limit)).fetchall()

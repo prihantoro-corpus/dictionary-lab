@@ -14,7 +14,8 @@ def get_metrics(token, where_clause="1=1", params=()):
     conn, is_shared = get_connection()
     
     # Total tokens in current subset
-    total_tokens = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE {where_clause}", params).fetchone()[0]
+    result = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE {where_clause}", params).fetchone()
+    total_tokens = result[0] if result else 0
     if total_tokens == 0:
         if not is_shared:
             conn.close()
@@ -26,7 +27,8 @@ def get_metrics(token, where_clause="1=1", params=()):
             f.write(f"FREQ: token='{token}', where='{where_clause}', params={params}\n")
     except:
         pass
-    count = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE token ILIKE ? AND {where_clause}", (token, *params)).fetchone()[0]
+    result = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE token ILIKE ? AND {where_clause}", (token, *params)).fetchone()
+    count = result[0] if result else 0
     
     pmw = (count / total_tokens) * 1000000
     

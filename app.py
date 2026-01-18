@@ -28,7 +28,8 @@ def main():
         params=filters['params'],
         stop_words=filters['stop_words'],
         collocate_filter=filters['collocate_filter'],
-        skip_punct=filters.get('skip_punct', True)
+        skip_punct=filters.get('skip_punct', True),
+        no_corpora=filters.get('no_corpora', False)
     )
 
 if __name__ == "__main__":

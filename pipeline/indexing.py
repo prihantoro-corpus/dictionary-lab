@@ -5,23 +5,39 @@ import time
 
 DB_PATH = "dictionary.duckdb"
 
+def _connect_with_retry(path, read_only=False, retries=5):
+    """Internal helper to connect with retries for locked DB."""
+    for i in range(retries):
+        try:
+            conn = duckdb.connect(path, read_only=read_only)
+            # Ensure JSON extension is loaded
+            try:
+                conn.execute("INSTALL json; LOAD json;")
+            except:
+                pass
+            return conn
+        except Exception as e:
+            if "used by another process" in str(e) and i < retries - 1:
+                time.sleep(0.5 * (i + 1))
+                continue
+            raise e
+
 def get_connection(read_only=False):
     """
-    Returns (conn, is_shared)
+    Returns (conn, is_shared). 
+    In Streamlit, attempts to use st.session_state for a persistent connection.
     """
     try:
+        # Check if we are in a Streamlit context
         if 'duckdb_conn' not in st.session_state:
-            st.session_state.duckdb_conn = duckdb.connect(DB_PATH, read_only=False)
-            # Ensure JSON extension is loaded for metadata queries
-            st.session_state.duckdb_conn.execute("INSTALL json; LOAD json;")
+            # First time: try to connect. If locked, maybe it's another session/process.
+            # We try read-only first if that's what's requested, or read-write if it's the main session.
+            st.session_state.duckdb_conn = _connect_with_retry(DB_PATH, read_only=read_only)
             st.session_state.duckdb_conn.execute("SET preserve_insertion_order=false")
         return st.session_state.duckdb_conn, True
-    except Exception:
-        conn = duckdb.connect(DB_PATH, read_only=read_only)
-        try:
-            conn.execute("INSTALL json; LOAD json;")
-        except:
-            pass
+    except (st.errors.StreamlitAPIException, Exception):
+        # Fallback for background scripts or if session_state fails
+        conn = _connect_with_retry(DB_PATH, read_only=read_only)
         return conn, False
 
 def safe_execute(conn, query, params=(), retries=3):

@@ -1,18 +1,18 @@
 from pipeline.indexing import get_connection, safe_execute
 import Levenshtein
 
-def autocomplete(prefix, limit=10):
+def autocomplete(prefix, where_clause="1=1", params=(), limit=10):
     conn, is_shared = get_connection()
-    query = "SELECT DISTINCT token FROM tokens WHERE token ILIKE ? LIMIT ?"
-    res = safe_execute(conn, query, (f"{prefix}%", limit)).fetchall()
+    query = f"SELECT DISTINCT token FROM tokens WHERE token ILIKE ? AND {where_clause} LIMIT ?"
+    res = safe_execute(conn, query, (f"{prefix}%", *params, limit)).fetchall()
     if not is_shared:
         conn.close()
     return [r[0] for r in res]
 
-def search_exact(token):
+def search_exact(token, where_clause="1=1", params=()):
     conn, is_shared = get_connection()
-    query = "SELECT * FROM tokens WHERE token = ?"
-    df = safe_execute(conn, query, (token,)).fetchdf()
+    query = f"SELECT * FROM tokens WHERE token ILIKE ? AND {where_clause}"
+    df = safe_execute(conn, query, (token, *params)).fetchdf()
     if not is_shared:
         conn.close()
     return df
