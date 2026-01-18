@@ -3,8 +3,6 @@ import duckdb
 import os
 import json
 import tempfile
-import tkinter as tk
-from tkinter import filedialog
 from pipeline.indexing import get_connection
 from pipeline.overrides_io import load_overrides, save_overrides
 
@@ -163,52 +161,39 @@ def render():
 
     # --- Personal Overrides File (Persistence) ---
     with st.sidebar.expander("🛠️ Personal Overrides Management", expanded=True):
+        st.caption("Specify the path to your personal JSON file:")
         
-        def select_folder():
-            root = tk.Tk()
-            root.withdraw()
-            root.wm_attributes('-topmost', 1)
-            folder_path = filedialog.askdirectory(master=root)
-            root.destroy()
-            return folder_path
-
-        def select_file():
-            root = tk.Tk()
-            root.withdraw()
-            root.wm_attributes('-topmost', 1)
-            file_path = filedialog.askopenfilename(master=root, filetypes=[("JSON files", "*.json")])
-            root.destroy()
-            return file_path
-
-        col_a, col_b = st.columns(2)
-        if col_a.button("📂 Select Existing", help="Pick an existing JSON file from your computer."):
-            picked_file = select_file()
-            if picked_file:
-                st.session_state['personal_file_path'] = picked_file
-                st.session_state['overrides'] = load_overrides(picked_file)
-                st.success("Loaded personal file!")
-                st.rerun()
-
-        if col_b.button("📁 New: Select Folder", help="Select a folder where you want to create a new modification file."):
-            picked_folder = select_folder()
-            if picked_folder:
-                st.session_state['temp_folder'] = picked_folder
+        # Text input for file path
+        default_path = st.session_state.get('personal_file_path', 'personal_overrides.json')
+        file_path_input = st.text_input(
+            "Personal File Path",
+            value=default_path,
+            help="Enter the full path to your personal modifications JSON file. The file will be created if it doesn't exist."
+        )
         
-        if 'temp_folder' in st.session_state:
-            with st.container():
-                st.caption(f"Folder: {st.session_state['temp_folder']}")
-                new_fn = st.text_input("New Filename", value="personal_modifications.json")
-                if st.button("✅ Confirm & Create"):
-                    full_path = os.path.join(st.session_state['temp_folder'], new_fn)
-                    st.session_state['personal_file_path'] = full_path
-                    if not os.path.exists(full_path):
-                        save_overrides(full_path, {})
-                    del st.session_state['temp_folder']
-                    st.rerun()
+        if st.button("✅ Set & Load File", use_container_width=True):
+            st.session_state['personal_file_path'] = file_path_input
+            # Create file if it doesn't exist
+            if not os.path.exists(file_path_input):
+                try:
+                    # Create directory if needed
+                    os.makedirs(os.path.dirname(file_path_input) or '.', exist_ok=True)
+                    save_overrides(file_path_input, {})
+                    st.success(f"Created new file: {file_path_input}")
+                except Exception as e:
+                    st.error(f"Could not create file: {e}")
+            else:
+                # Load existing file
+                loaded_data = load_overrides(file_path_input)
+                if loaded_data is not None:
+                    st.session_state['overrides'] = loaded_data
+                    st.success(f"Loaded from {file_path_input}!")
+                else:
+                    st.error("Failed to load file.")
+            st.rerun()
 
         p_path = st.session_state.get('personal_file_path', 'personal_overrides.json')
-        st.info(f"**This is your personal modification file:**\n`{p_path}`")
-        st.session_state['personal_file_path'] = p_path
+        st.info(f"**Current file:**\n`{p_path}`")
 
         if st.button("🔄 Sync from File (Read)", help="Re-load overrides from your personal JSON file into the current session (discards unsaved session changes).", use_container_width=True):
              loaded_data = load_overrides(p_path)
