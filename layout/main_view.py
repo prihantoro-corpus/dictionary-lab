@@ -118,15 +118,15 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
     .phonetic {
         font-family: 'Open Sans', sans-serif;
         font-size: 1.1rem;
-        color: #555;
+        color: inherit; /* Adaptive */
         margin-right: 0.5rem;
-        text-shadow: 1px 0 #fff, -1px 0 #fff, 0 1px #fff, 0 -1px #fff;
+        opacity: 0.8;
     }
     .pos-tag {
         font-family: 'Open Sans', sans-serif;
         font-weight: 700;
         font-size: 0.9rem;
-        color: #c00; /* Deep Red */
+        color: #c00; /* Deep Red - keep for branding */
         text-transform: uppercase;
         background: #fff0f0;
         padding: 2px 6px;
@@ -142,7 +142,7 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
     .definition {
         font-family: 'Open Sans', sans-serif;
         font-size: 1.1rem;
-        color: #222;
+        color: inherit; /* Adaptive */
         line-height: 1.4;
         margin-bottom: 0.5rem;
     }
@@ -150,12 +150,12 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
     /* Examples Styling */
     .example-box {
         border-left: 3px solid #1d2a57;
-        background-color: #f4f6f9;
+        background-color: rgba(128, 128, 128, 0.1); /* Adaptive transparent bg */
         padding: 4px 8px;
         margin-top: 4px;
         font-family: 'Merriweather', serif;
         font-style: italic;
-        color: #333;
+        color: inherit; /* Adaptive */
         font-size: 0.95rem;
     }
     
@@ -252,6 +252,19 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                 freq = override.get('frequency') if 'frequency' in override else metrics_corpus['frequency']
                 is_manual_freq = 'frequency' in override
                 
+                # Calculate dynamic metrics (PMW, Zipf)
+                total_toks = metrics_corpus.get('total_subset', 1) or 1
+                if is_manual_freq:
+                    pmw_val = (freq / total_toks) * 1000000
+                    if pmw_val > 1000: zipf_val = 5
+                    elif pmw_val > 100: zipf_val = 4
+                    elif pmw_val > 10: zipf_val = 3
+                    elif pmw_val > 1: zipf_val = 2
+                    else: zipf_val = 1
+                else:
+                    pmw_val = metrics_corpus.get('pmw', 0)
+                    zipf_val = metrics_corpus.get('zipf', 1)
+
                 # HTML Header Block
                 st.markdown(f"""
                 <div class="entry-header">
@@ -262,18 +275,30 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                 """, unsafe_allow_html=True)
                 
                 # Metadata Row (Frequency, CEFR, etc.) - Compact
-                m1, m2, m3 = st.columns([2, 2, 4])
+                m1, m2, m3 = st.columns([2, 4, 3]) # Adjusted ratio for more badges
                 with m1:
                     st.caption(f"Freq: **{freq}** {'(Manual)' if is_manual_freq else ''}")
                 with m2:
-                    wl_badges = manager.check_token(query)
+                    wl_badges = manager.check_token(query, lemma=lemma)
+                    # Append PMW and Zipf badges
+                    wl_badges.append({'name': 'PMW', 'value': f"{pmw_val:.2f}"})
+                    wl_badges.append({'name': 'Zipf', 'value': str(zipf_val)})
+                    
                     if wl_badges:
-                        badges_html = " ".join([f"<span style='background:#e0f2f1; color:#00695c; padding:2px 6px; border-radius:4px; font-size:12px;'>{b['name']} {b['value']}</span>" for b in wl_badges])
+                        badges_html = " ".join([f"<span style='background:#e0f2f1; color:#00695c; padding:2px 6px; border-radius:4px; font-size:12px; margin-right:4px;'>{b['name']} {b['value']}</span>" for b in wl_badges])
                         st.markdown(badges_html, unsafe_allow_html=True)
                 with m3:
-                     # Zipf and PMW simplified
-                     pass 
-
+                     # Visual Zipf Band (5 bars) - Optional now that we have badges, but keeping for visual
+                     bars_html = ""
+                     for i in range(1, 6):
+                         color = "#1d2a57" if i <= zipf_val else "#e0e0e0"
+                         bars_html += f"<span style='display:inline-block; width:6px; height:10px; background-color:{color}; margin-right:2px; border-radius:1px;'></span>"
+                     
+                     st.markdown(f"""
+                     <div style="display:flex; align-items:center; opacity:0.8;" title="Visual Frequency Band">
+                        {bars_html}
+                     </div>
+                     """, unsafe_allow_html=True)
                 # Definition Block
                 st.markdown(f"""
                 <div class="sense-block">
@@ -382,39 +407,60 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
 
                 
                 # Collocates
-                st.subheader("Top-26 Collocates")
+                st.subheader("Top-20 Collocates")
                 coll_over = parse_manual_list(override.get('manual_collocates', ''))
                 if coll_over:
-                    collocs = [{'collocate': r[0], 'LL': r[1] if len(r)>1 else '0'} for r in coll_over]
+                    # Manual overrides: r[0] is collocate, r[1] is LL score. Freq is not provided in manual input.
+                    collocs = [{'collocate': r[0], 'score': float(r[1]) if len(r)>1 and r[1].replace('.', '', 1).isdigit() else 0.0, 'freq': 0} for r in coll_over]
                 else:
+                    # Assume get_collocates returns {'collocate', 'score', 'freq'}
                     collocs = collocation.get_collocates(query, limit=26, where_clause=where_clause, params=params, stop_words=stop_words, allowed_words=collocate_filter, skip_punct=skip_punct)
                 
                 if collocs:
-                    # 13-Column Grid (2 items each) -> 13x2 = 26
-                    # Filling Column-by-Column (chunks of 2)
-                    chunks = [collocs[i:i + 2] for i in range(0, len(collocs), 2)]
+                    # 4 Columns x 5 Rows = 20 items
+                    # Vertical filling (Column 1 has 1-5, etc.)
+                    limit_n = 20
+                    collocs_subset = collocs[:limit_n]
                     
-                    cols_grid = st.columns(13)
+                    # Split into 4 chunks (columns)
+                    # Ensure we have enough chunks even if fewer items
+                    chunk_size = 5
+                    chunks = [collocs_subset[i:i + chunk_size] for i in range(0, len(collocs_subset), chunk_size)]
                     
-                    for i, chunk in enumerate(chunks):
-                        if i < 13:
-                            with cols_grid[i]:
-                                for c in chunk:
-                                    st.button(c['collocate'], key=f"coll_{c['collocate']}_{tag}", on_click=cb_update_query, args=(c['collocate'],))
-
-                    # Download Button
+                    cols_grid = st.columns(4)
+                    
+                    for col_idx, chunk in enumerate(chunks):
+                        if col_idx < 4:
+                            with cols_grid[col_idx]:
+                                for item in chunk:
+                                    col_txt = item['collocate']
+                                    score_val = item.get('score', item.get('LL', 0))
+                                    freq_val = item.get('freq', 0)
+                                    
+                                    # Button: "Word (Score)"
+                                    if st.button(
+                                        f"{col_txt} ({score_val:.1f})", 
+                                        key=f"coll_{col_txt}_{tag}", 
+                                        help=f"Frequency: {freq_val}\nLog-Likelihood: {score_val:.2f}",
+                                        use_container_width=True
+                                    ):
+                                        st.session_state.query = col_txt
+                                        st.rerun()
+                    
                     st.divider()
-                    df_collocs = pd.DataFrame(collocs)
+                    
+                    # Download Button (Full CSV)
+                    df_collocs = pd.DataFrame(collocs) # Download full list, not just top 20
                     csv_collocs = df_collocs.to_csv(index=False).encode('utf-8')
                     st.download_button(
-                        label="📥 Download Collocates Table",
+                        label="📥 Download Full Collocates",
                         data=csv_collocs,
                         file_name=f"collocates_{query}_{tag}.csv",
                         mime="text/csv",
-                        key=f"dl_collocs_{query}_{tag}"
+                        key=f"dl_coll_{query}_{tag}"
                     )
                 else:
-                    st.caption("No collocates found.")
+                    st.info("No collocates found.")
                 
                 st.divider()
                 
