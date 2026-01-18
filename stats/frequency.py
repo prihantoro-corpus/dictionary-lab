@@ -7,7 +7,7 @@ def get_total_tokens(where_clause="1=1", params=()):
         conn.close()
     return res[0] if res else 0
 
-def get_metrics(token, where_clause="1=1", params=()):
+def get_metrics(token, where_clause="1=1", params=(), pos_tag=None):
     """
     Returns dict with frequency, pmw, and zipf band.
     """
@@ -24,10 +24,18 @@ def get_metrics(token, where_clause="1=1", params=()):
     # Frequency of specific token (case-insensitive for dictionary overview)
     try:
         with open("debug_queries.log", "a", encoding="utf-8") as f:
-            f.write(f"FREQ: token='{token}', where='{where_clause}', params={params}\n")
+            f.write(f"FREQ: token='{token}', tag='{pos_tag}', where='{where_clause}', params={params}\n")
     except:
         pass
-    result = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE token ILIKE ? AND {where_clause}", (token, *params)).fetchone()
+    
+    if pos_tag:
+        query = f"SELECT COUNT(*) FROM tokens WHERE token ILIKE ? AND tag = ? AND {where_clause}"
+        query_params = (token, pos_tag, *params)
+    else:
+        query = f"SELECT COUNT(*) FROM tokens WHERE token ILIKE ? AND {where_clause}"
+        query_params = (token, *params)
+        
+    result = safe_execute(conn, query, query_params).fetchone()
     count = result[0] if result else 0
     
     pmw = (count / total_tokens) * 1000000

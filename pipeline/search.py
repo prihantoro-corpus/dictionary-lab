@@ -74,3 +74,40 @@ def get_related_words(token, limit=20):
     if not is_shared:
         conn.close()
     return [r[0] for r in res]
+
+def get_corpus_stats(where_clause="1=1", params=()):
+    """Returns basic stats for the Entry tab."""
+    conn, is_shared = get_connection()
+    
+    stats = {}
+    
+    # Total Token Count
+    res = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE {where_clause}", params).fetchone()
+    stats['total_tokens'] = res[0] if res else 0
+    
+    # Total Lemma Count
+    res = safe_execute(conn, f"SELECT COUNT(DISTINCT lemma) FROM tokens WHERE {where_clause}", params).fetchone()
+    stats['total_lemmas'] = res[0] if res else 0
+    
+    # List of POS Tags
+    res = safe_execute(conn, f"SELECT DISTINCT tag FROM tokens WHERE {where_clause} ORDER BY tag", params).fetchall()
+    stats['pos_tags'] = [r[0] for r in res if r[0]]
+    
+    if not is_shared:
+        conn.close()
+    return stats
+
+def get_full_frequency_list(where_clause="1=1", params=()):
+    """Returns a DataFrame of all tokens and their frequencies."""
+    conn, is_shared = get_connection()
+    df = safe_execute(conn, f"""
+        SELECT token, COUNT(*) as freq 
+        FROM tokens 
+        WHERE {where_clause}
+        GROUP BY token 
+        ORDER BY freq DESC
+    """, params).fetchdf()
+    
+    if not is_shared:
+        conn.close()
+    return df

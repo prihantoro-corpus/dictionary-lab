@@ -1,19 +1,28 @@
 from pipeline.indexing import get_connection, safe_execute
 
-def get_kwic_lines(token, window=7, limit=50, where_clause="1=1", params=()):
+def get_kwic_lines(token, window=7, limit=50, where_clause="1=1", params=(), pos_tag=None):
     """
     Returns list of dicts: {left, node, right, metadata}
     """
     conn, is_shared = get_connection()
     
     # 1. Find IDs of the token matching filters
-    matches = safe_execute(conn, f"""
-        SELECT id, file_id 
-        FROM tokens 
-        WHERE token ILIKE ? AND {where_clause} 
-        ORDER BY id
-        LIMIT ?
-    """, (token, *params, limit)).fetchall()
+    if pos_tag:
+        matches = safe_execute(conn, f"""
+            SELECT id, file_id 
+            FROM tokens 
+            WHERE token ILIKE ? AND tag = ? AND {where_clause} 
+            ORDER BY id
+            LIMIT ?
+        """, (token, pos_tag, *params, limit)).fetchall()
+    else:
+        matches = safe_execute(conn, f"""
+            SELECT id, file_id 
+            FROM tokens 
+            WHERE token ILIKE ? AND {where_clause} 
+            ORDER BY id
+            LIMIT ?
+        """, (token, *params, limit)).fetchall()
     
     results = []
     
@@ -52,22 +61,33 @@ def get_kwic_lines(token, window=7, limit=50, where_clause="1=1", params=()):
         conn.close()
     return results
 
-def get_collocate_kwic(token, collocate, window=7, limit=5, where_clause="1=1", params=()):
+def get_collocate_kwic(token, collocate, window=7, limit=5, where_clause="1=1", params=(), pos_tag=None):
     """
     Returns KWIC lines where BOTH token and collocate appear in the window.
     """
     conn, is_shared = get_connection()
     
     # Search for pairs - use subquery for t1 to avoid ambiguous columns in where_clause
-    query = f"""
-        SELECT t1.id, t1.file_id, t2.id as col_id
-        FROM (SELECT id, file_id, token FROM tokens WHERE {where_clause}) t1
-        JOIN tokens t2 ON t1.file_id = t2.file_id AND t2.id BETWEEN t1.id - ? AND t1.id + ? AND t1.id != t2.id
-        WHERE t1.token ILIKE ? AND t2.token ILIKE ?
-        ORDER BY t1.id
-        LIMIT ?
-    """
-    matches = safe_execute(conn, query, (*params, window, window, token, collocate, limit)).fetchall()
+    if pos_tag:
+         query = f"""
+            SELECT t1.id, t1.file_id, t2.id as col_id
+            FROM (SELECT id, file_id, token, tag FROM tokens WHERE {where_clause}) t1
+            JOIN tokens t2 ON t1.file_id = t2.file_id AND t2.id BETWEEN t1.id - ? AND t1.id + ? AND t1.id != t2.id
+            WHERE t1.token ILIKE ? AND t1.tag = ? AND t2.token ILIKE ?
+            ORDER BY t1.id
+            LIMIT ?
+        """
+         matches = safe_execute(conn, query, (*params, window, window, token, pos_tag, collocate, limit)).fetchall()
+    else:
+        query = f"""
+            SELECT t1.id, t1.file_id, t2.id as col_id
+            FROM (SELECT id, file_id, token FROM tokens WHERE {where_clause}) t1
+            JOIN tokens t2 ON t1.file_id = t2.file_id AND t2.id BETWEEN t1.id - ? AND t1.id + ? AND t1.id != t2.id
+            WHERE t1.token ILIKE ? AND t2.token ILIKE ?
+            ORDER BY t1.id
+            LIMIT ?
+        """
+        matches = safe_execute(conn, query, (*params, window, window, token, collocate, limit)).fetchall()
     
     results = []
     for match_id, file_id, col_id in matches:

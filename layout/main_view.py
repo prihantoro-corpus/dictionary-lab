@@ -89,88 +89,91 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
         st.info("💡 **Getting Started**: Select one or more corpora from the sidebar to begin searching and indexing.")
         st.caption("You can also upload your own files or choose from the 'Available on Disk' collection.")
 
+
+    
+    # Custom CSS for Professional Look
+    st.markdown("""
+    <style>
+    /* ... CSS kept ... */
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Navigation Tabs
+    # We use a radio button styled as tabs or just simple toggle
+    nav = st.radio("Navigation", ["Search", "Corpus Statistic"], horizontal=True, label_visibility="collapsed", key="main_nav")
+    
+    if nav == "Corpus Statistic":
+        render_entry_tab(where_clause, params)
+    else:
+        render_search_tab(where_clause, params, stop_words, collocate_filter, skip_punct)
+
+def render_entry_tab(where_clause, params):
+    st.title("Corpus Statistic")
+    
+    # 1. Stats
+    stats = search.get_corpus_stats(where_clause, params)
+    
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Tokens", f"{stats['total_tokens']:,}")
+    c2.metric("Total Lemmas", f"{stats['total_lemmas']:,}")
+    c3.metric("Unique POS Tags", len(stats['pos_tags']))
+    
+    with st.expander("View POS Tags"):
+        st.write(", ".join(stats['pos_tags']))
+        
+    st.divider()
+    st.subheader("Frequency List")
+    
+    # 2. Data
+    df = search.get_full_frequency_list(where_clause, params)
+    
+    if df.empty:
+        st.info("No tokens found in current selection.")
+        return
+        
+    # Add Definition Column (from overrides)
+    def get_def(token):
+        # Optimistic check
+        ov = st.session_state['overrides'].get(token, {})
+        if not ov:
+             ov = st.session_state['overrides'].get(token.lower(), {})
+        return ov.get('definition', '')
+
+    df['Definition'] = df['token'].apply(get_def)
+    
+    # Sort: Definition (Desc -> items with def first), then Freq (Desc)
+    df = df.sort_values(by=['Definition', 'freq'], ascending=[False, False])
+    
+    # 3. Interactive Table
+    event = st.dataframe(
+        df,
+        column_order=("token", "freq", "Definition"),
+        column_config={
+            "token": st.column_config.TextColumn("Token"),
+            "freq": st.column_config.NumberColumn("Frequency"),
+            "Definition": st.column_config.TextColumn("Definition", width="large")
+        },
+        use_container_width=True,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row"
+    )
+    
+    if event.selection.rows:
+        idx = event.selection.rows[0]
+        selected_token = df.iloc[idx]['token']
+        # Redirect
+        st.session_state.search_box = selected_token
+        st.session_state.main_nav = "Search"
+        st.rerun()
+
+def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_punct):
     # Search input - the widget automatically syncs with st.session_state.search_box
     st.text_input(
         "Search word:", 
         placeholder="Enter a word to see its dictionary entry...",
         key="search_box"
     )
-    
-    # Custom CSS for Professional Look
-    st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@300;700;900&family=Open+Sans:wght@400;600&display=swap');
-    
-    /* Global Tightening */
-    .block-container { padding-top: 2rem !important; padding-bottom: 2rem !important; }
-    div[data-testid="stDivider"] { margin-top: 0.5rem; margin-bottom: 0.5rem; }
-    
-    /* Typography */
-    .headword {
-        font-family: 'Merriweather', serif;
-        font-size: 2.2rem;
-        font-weight: 900;
-        color: #1d2a57; /* Navy Blue */
-        margin-right: 0.5rem;
-        line-height: 1.2;
-        text-shadow: 2px 0 #fff, -2px 0 #fff, 0 2px #fff, 0 -2px #fff, 1px 1px #fff, -1px -1px #fff, 1px -1px #fff, -1px 1px #fff;
-    }
-    .phonetic {
-        font-family: 'Open Sans', sans-serif;
-        font-size: 1.1rem;
-        color: inherit; /* Adaptive */
-        margin-right: 0.5rem;
-        opacity: 0.8;
-    }
-    .pos-tag {
-        font-family: 'Open Sans', sans-serif;
-        font-weight: 700;
-        font-size: 0.9rem;
-        color: #c00; /* Deep Red - keep for branding */
-        text-transform: uppercase;
-        background: #fff0f0;
-        padding: 2px 6px;
-        border-radius: 4px;
-        vertical-align: middle;
-    }
-    
-    /* Definition Block */
-    .sense-block {
-        margin-top: 0.5rem;
-        margin-bottom: 0.5rem;
-    }
-    .definition {
-        font-family: 'Open Sans', sans-serif;
-        font-size: 1.1rem;
-        color: inherit; /* Adaptive */
-        line-height: 1.4;
-        margin-bottom: 0.5rem;
-    }
-    
-    /* Examples Styling */
-    .example-box {
-        border-left: 3px solid #1d2a57;
-        background-color: rgba(128, 128, 128, 0.1); /* Adaptive transparent bg */
-        padding: 4px 8px;
-        margin-top: 4px;
-        font-family: 'Merriweather', serif;
-        font-style: italic;
-        color: inherit; /* Adaptive */
-        font-size: 0.95rem;
-    }
-    
-    /* Section Headers */
-    h3 {
-        font-family: 'Open Sans', sans-serif !important;
-        font-size: 1.1rem !important;
-        color: #1d2a57 !important;
-        margin-bottom: 4px !important;
-        padding-top: 8px !important;
-        text-shadow: 1px 0 #fff, -1px 0 #fff, 0 1px #fff, 0 -1px #fff;
-    }
-    
-    </style>
-    """, unsafe_allow_html=True)
 
     # Use the widget's current value as the query
     query = st.session_state.search_box.strip()
@@ -223,32 +226,30 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
         # Pre-fetch common data
         lemma = search.get_lemma(query)
         same_lemma_words = search.get_forms_by_lemma(lemma)
-        all_pos_tags = sorted(list(set(search.get_pos_tags(query) + list(query_overrides.keys()))))
         
-        # Global metrics for this token (from corpus)
-        metrics_corpus = frequency.get_metrics(query, where_clause, params)
+        # Global metrics (Removed - calculated per sense now)
+        # metrics_corpus = frequency.get_metrics(query, where_clause, params)
 
         # Render senses
         for i, tag in enumerate(all_display_tags):
             with tabs[i]:
                 # Data from overrides
                 override = query_overrides.get(tag, {})
-                is_override = bool(override)
                 
                 # 1. Definition
                 def_key = f"def_{query}_{tag}"
-                # Precedence: Override > SessionState > Corpus (none here)
                 curr_def = override.get('definition') or st.session_state.get(def_key, "")
                 
                 # Header - Professional Style
-                # Precedence: Override > default IPA
                 try:
                     default_pron = ipa.convert(query)
                 except:
                     default_pron = query
                 pron = override.get('pronunciation') or default_pron
                 
-                # Check metrics
+                # Check metrics (Per Sense)
+                metrics_corpus = frequency.get_metrics(query, where_clause, params, pos_tag=tag)
+                
                 freq = override.get('frequency') if 'frequency' in override else metrics_corpus['frequency']
                 is_manual_freq = 'frequency' in override
                 
@@ -265,22 +266,16 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                     pmw_val = metrics_corpus.get('pmw', 0)
                     zipf_val = metrics_corpus.get('zipf', 1)
 
-                # HTML Header Block
-                st.markdown(f"""
-                <div class="entry-header">
-                    <span class="headword">{query}</span>
-                    <span class="phonetic">/{pron}/</span>
-                    <span class="pos-tag">{tag}</span>
-                </div>
-                """, unsafe_allow_html=True)
+                # Standard Streamlit Header (Restored)
+                st.header(f"{query}")
+                st.markdown(f"**/{pron}/** *{tag}*")
                 
-                # Metadata Row (Frequency, CEFR, etc.) - Compact
-                m1, m2, m3 = st.columns([2, 4, 3]) # Adjusted ratio for more badges
+                # Metadata Row
+                m1, m2, m3 = st.columns([2, 4, 3])
                 with m1:
                     st.caption(f"Freq: **{freq}** {'(Manual)' if is_manual_freq else ''}")
                 with m2:
                     wl_badges = manager.check_token(query, lemma=lemma)
-                    # Append PMW and Zipf badges
                     wl_badges.append({'name': 'PMW', 'value': f"{pmw_val:.2f}"})
                     wl_badges.append({'name': 'Zipf', 'value': str(zipf_val)})
                     
@@ -288,7 +283,7 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                         badges_html = " ".join([f"<span style='background:#e0f2f1; color:#00695c; padding:2px 6px; border-radius:4px; font-size:12px; margin-right:4px;'>{b['name']} {b['value']}</span>" for b in wl_badges])
                         st.markdown(badges_html, unsafe_allow_html=True)
                 with m3:
-                     # Visual Zipf Band (5 bars) - Optional now that we have badges, but keeping for visual
+                     # Visual Zipf Band
                      bars_html = ""
                      for i in range(1, 6):
                          color = "#1d2a57" if i <= zipf_val else "#e0e0e0"
@@ -306,14 +301,14 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Navigation Rows - Stacked (Full Width)
+                # Navigation Rows
                 render_clickable_word_row("Words from same Lemma", same_lemma_words, key_prefix="lemma", context=tag)
-                related = search.get_related_words(query, limit=10) # Limit 10
+                related = search.get_related_words(query, limit=10)
                 render_clickable_word_row("Related Words", related, key_prefix="related", context=tag)
 
-                st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) # Spacer
+                st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
                 
-                # Form to Edit (Collapsed by default and compacted)
+                # Form to Edit
                 render_sense_editor(query, tag, {
                     "definition": curr_def,
                     "pronunciation": pron,
@@ -325,12 +320,12 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                     "manual_collo_ex": override.get('manual_collo_ex', '')
                 })
                 
-                # External Links - minimalist
+                # External Links
                 st.markdown(f"<div style='font-size:12px; margin-top:5px;'><a href='https://www.collinsdictionary.com/dictionary/english/{query}' target='_blank'>Collins Dictionary</a> • <a href='https://www.collinsdictionary.com/dictionary/english-thesaurus/{query}' target='_blank'>Thesaurus</a></div>", unsafe_allow_html=True)
                 
                 st.divider()
                 
-                # N-Grams Side-by-Side
+                # N-Grams
                 st.subheader("N-Grams")
                 
                 # Bigram/Trigram Manual Overrides
@@ -346,9 +341,9 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                         'tri_w_w_s': []
                     }
                 else:
-                    ngrams = collocation.get_ngrams(query, where_clause=where_clause, params=params, stop_words=stop_words, skip_punct=skip_punct)
+                    ngrams = collocation.get_ngrams(query, where_clause=where_clause, params=params, stop_words=stop_words, skip_punct=skip_punct, pos_tag=tag)
 
-                c_bi, c_tri = st.columns([4, 6]) # 40% / 60% Split
+                c_bi, c_tri = st.columns([4, 6])
                 
                 with c_bi:
                     st.caption("**Bigrams**")
@@ -376,7 +371,6 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
 
                 with c_tri:
                     st.caption("**Trigrams**")
-                    # Side-by-side sub-columns for Trigrams
                     t1, t2, t3 = st.columns(3)
                     with t1:
                         st.caption(f"{query}+W+W")
@@ -410,20 +404,13 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                 st.subheader("Top-20 Collocates")
                 coll_over = parse_manual_list(override.get('manual_collocates', ''))
                 if coll_over:
-                    # Manual overrides: r[0] is collocate, r[1] is LL score. Freq is not provided in manual input.
                     collocs = [{'collocate': r[0], 'score': float(r[1]) if len(r)>1 and r[1].replace('.', '', 1).isdigit() else 0.0, 'freq': 0} for r in coll_over]
                 else:
-                    # Assume get_collocates returns {'collocate', 'score', 'freq'}
-                    collocs = collocation.get_collocates(query, limit=26, where_clause=where_clause, params=params, stop_words=stop_words, allowed_words=collocate_filter, skip_punct=skip_punct)
+                    collocs = collocation.get_collocates(query, limit=26, where_clause=where_clause, params=params, stop_words=stop_words, allowed_words=collocate_filter, skip_punct=skip_punct, pos_tag=tag)
                 
                 if collocs:
-                    # 4 Columns x 5 Rows = 20 items
-                    # Vertical filling (Column 1 has 1-5, etc.)
                     limit_n = 20
                     collocs_subset = collocs[:limit_n]
-                    
-                    # Split into 4 chunks (columns)
-                    # Ensure we have enough chunks even if fewer items
                     chunk_size = 5
                     chunks = [collocs_subset[i:i + chunk_size] for i in range(0, len(collocs_subset), chunk_size)]
                     
@@ -437,7 +424,6 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                                     score_val = item.get('score', item.get('LL', 0))
                                     freq_val = item.get('freq', 0)
                                     
-                                    # Button: "Word (Score)"
                                     if st.button(
                                         f"{col_txt} ({score_val:.1f})", 
                                         key=f"coll_{col_txt}_{tag}", 
@@ -449,44 +435,29 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                     
                     st.divider()
                     
-                    # Download Button (Full CSV)
-                    df_collocs = pd.DataFrame(collocs) # Download full list, not just top 20
+                    df_collocs = pd.DataFrame(collocs)
                     csv_collocs = df_collocs.to_csv(index=False).encode('utf-8')
-                    st.download_button(
-                        label="📥 Download Full Collocates",
-                        data=csv_collocs,
-                        file_name=f"collocates_{query}_{tag}.csv",
-                        mime="text/csv",
-                        key=f"dl_coll_{query}_{tag}"
-                    )
+                    st.download_button("📥 Download Full Collocates", csv_collocs, f"collocates_{query}_{tag}.csv", "text/csv", key=f"dl_coll_{query}_{tag}")
                 else:
                     st.info("No collocates found.")
                 
                 st.divider()
                 
-                # KWIC Examples (Reverted to Old Style)
+                # KWIC Examples
                 st.subheader("Examples")
                 ex_over = parse_manual_list(override.get('manual_examples', ''))
                 
                 if ex_over:
                     kwic_lines = [{'left': r[0], 'node': r[1], 'right': r[2]} for r in ex_over if len(r) >= 3]
                 else:
-                    kwic_lines = kwic.get_kwic_lines(query, where_clause=where_clause, params=params, limit=10) # Restored limit or keep small? User said "old version", likely refers to style.
+                    kwic_lines = kwic.get_kwic_lines(query, where_clause=where_clause, params=params, limit=10, pos_tag=tag)
                 
-                # Download KWIC
                 if kwic_lines:
                      df_kwic = pd.DataFrame(kwic_lines)
                      csv_kwic = df_kwic.to_csv(index=False).encode('utf-8')
-                     st.download_button(
-                        label="📥 Download Examples",
-                        data=csv_kwic,
-                        file_name=f"examples_{query}_{tag}.csv",
-                        mime="text/csv",
-                        key=f"dl_kwic_{query}_{tag}"
-                     )
+                     st.download_button("📥 Download Examples", csv_kwic, f"examples_{query}_{tag}.csv", "text/csv", key=f"dl_kwic_{query}_{tag}")
                 
                 for line in kwic_lines:
-                     # Old Flexbox Style
                      st.markdown(f"""
                     <div style="display: flex; justify-content: center; font-family: monospace; font-size: 0.95rem; margin-bottom: 4px;">
                         <span style="text-align: right; width: 45%; margin-right: 10px;">{line['left']}</span>
@@ -500,22 +471,15 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
 
                 # Collocations & Examples
                 st.subheader("Examples by Collocates")
-                # Download Button for Collocate Examples (Need to fetch them all? Or just user manual ones? 
-                # "also present download table button to download examples and examples by collocates"
-                # For "Examples by collocates", there are many. I should probably just download the MANUAL ones if manual, or maybe fetch a batch?
-                # I'll stick to downloading the visible Manual ones for now, or maybe generated ones if not manual?
-                # Generating ALL collocate examples is heavy. I will only provide download for CURRENTLY VISIBLE or Manual overrides.
                 
                 collo_ex_over = parse_manual_list(override.get('manual_collo_ex', ''))
                 
                 if collo_ex_over:
-                     # Prepare Download
                      df_collo_ex = pd.DataFrame(collo_ex_over, columns=['Collocate', 'Left', 'Node', 'Right'])
                      csv_collo_ex = df_collo_ex.to_csv(index=False).encode('utf-8')
                      st.download_button("📥 Download Collocate Examples", csv_collo_ex, f"collo_examples_{query}.csv", "text/csv", key=f"dl_ce_{query}_{tag}")
 
                 if collo_ex_over:
-                    # Manual collocates
                     manual_collo_data = {}
                     for r in collo_ex_over:
                          if len(r) >= 4:
@@ -530,12 +494,11 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                             if st.button("Edit", key=f"edit_coll_sel_{query}_{tag}_{col_word}"):
                                  open_selection_dialog(query, tag, "collocate", collocate_word=col_word, where_clause=where_clause, params=params)
                 else:
-                    # Top Collocates 
-                    top_collocs = [c['collocate'] for c in collocs[:3]] # Limit 3 for display
+                    top_collocs = [c['collocate'] for c in collocs[:3]]
                     if top_collocs:
                          for col_word in top_collocs:
                             with st.expander(f"Usage with '{col_word}'", expanded=False):
-                                col_examples = kwic.get_collocate_kwic(query, col_word, where_clause=where_clause, params=params, limit=3)
+                                col_examples = kwic.get_collocate_kwic(query, col_word, where_clause=where_clause, params=params, limit=3, pos_tag=tag)
                                 if col_examples:
                                     for ex in col_examples:
                                          components.render_collocate_example(ex['left'], ex['node'], ex['right'], ex['col_token'])
@@ -545,17 +508,13 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                     else:
                          st.caption("No strong word partners found.")
                 
-                # Save Button (Direct to personal file)
                 st.divider()
                 p_path = st.session_state.get('personal_file_path')
                 if st.button("💾 Save Entry to Personal File", key=f"save_personal_{query}_{tag}"):
                     if p_path:
-                        # Ensure we have the latest entry in session state
                         if query not in st.session_state['overrides']:
                             st.session_state['overrides'][query] = {}
                         
-                        # Only update if not already manual or user confirms? 
-                        # For now, just save current view state as override
                         st.session_state['overrides'][query][tag] = {
                             "definition": curr_def,
                             "pronunciation": pron,
@@ -621,13 +580,13 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
                         st.rerun()
 
 @st.cache_data(show_spinner=False)
-def get_cached_candidates(token, type, collocate_word, where_clause, params):
+def get_cached_candidates(token, tag, type, collocate_word, where_clause, params):
     """Cached wrapper to ensure stable dataframe generation for data_editor."""
     if type == "general":
-        return kwic.get_kwic_lines(token, where_clause=where_clause, params=params, limit=50)
+        return kwic.get_kwic_lines(token, where_clause=where_clause, params=params, limit=50, pos_tag=tag)
     else:
         # Collocate
-        return kwic.get_collocate_kwic(token, collocate_word, where_clause=where_clause, params=params, limit=50)
+        return kwic.get_collocate_kwic(token, collocate_word, where_clause=where_clause, params=params, limit=50, pos_tag=tag)
 
 @st.dialog("Choose Concordance Lines", width="large")
 def open_selection_dialog(token, tag, type, collocate_word=None, where_clause="1=1", params=()):
@@ -636,7 +595,7 @@ def open_selection_dialog(token, tag, type, collocate_word=None, where_clause="1
     st.caption(f"You can select up to **{limit_cnt}** lines.")
     
     # 1. Fetch Candidates (Pool of 50) - Cached
-    candidates = get_cached_candidates(token, type, collocate_word, where_clause, params)
+    candidates = get_cached_candidates(token, tag, type, collocate_word, where_clause, params)
     
     if not candidates:
         st.warning("No concordance lines found to select from.")

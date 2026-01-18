@@ -59,14 +59,19 @@ def parse_collocate_filter(filter_list, alias="t2"):
     
     return " AND " + " AND ".join(clauses), params
 
-def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, skip_punct=True):
+def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, skip_punct=True, pos_tag=None):
     conn, is_shared = get_connection()
     if stop_words is None: stop_words = []
     
     results = {}
     
     # Base CTE (case-insensitive for broad coverage)
-    cte_matches = f"matches AS (SELECT id, file_id FROM tokens WHERE token ILIKE ? AND {where_clause})"
+    if pos_tag:
+        cte_matches = f"matches AS (SELECT id, file_id FROM tokens WHERE token ILIKE ? AND tag = ? AND {where_clause})"
+        base_params = (token, pos_tag)
+    else:
+        cte_matches = f"matches AS (SELECT id, file_id FROM tokens WHERE token ILIKE ? AND {where_clause})"
+        base_params = (token,)
     
     # Filters for neighbors
     neighbor_filter = ""
@@ -97,7 +102,7 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, 
         FROM next_tokens
         GROUP BY w2
         ORDER BY freq DESC LIMIT ?
-    """, (token, *params, *neighbor_params, token, limit)).fetchall()
+    """, (*base_params, *params, *neighbor_params, token, limit)).fetchall()
     
     # 2. Bigram: Word + Search (Backward)
     results['bi_word_search'] = safe_execute(conn, f"""
@@ -112,7 +117,7 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, 
         FROM prev_tokens
         GROUP BY w0
         ORDER BY freq DESC LIMIT ?
-    """, (token, *params, *neighbor_params, token, limit)).fetchall()
+    """, (*base_params, *params, *neighbor_params, token, limit)).fetchall()
     
     # 3. Trigram: Search + Word + Word (s w w)
     results['tri_s_w_w'] = safe_execute(conn, f"""
@@ -128,7 +133,7 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, 
         FROM next2
         GROUP BY w1, w2
         ORDER BY freq DESC LIMIT ?
-    """, (token, *params, *neighbor_params, *neighbor_params, token, limit)).fetchall()
+    """, (*base_params, *params, *neighbor_params, *neighbor_params, token, limit)).fetchall()
     
     # 4. Trigram: Word + Search + Word (w s w)
     results['tri_w_s_w'] = safe_execute(conn, f"""
@@ -144,7 +149,7 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, 
         FROM surround
         GROUP BY w0, w2
         ORDER BY freq DESC LIMIT ?
-    """, (token, *params, *neighbor_params, *neighbor_params, token, limit)).fetchall()
+    """, (*base_params, *params, *neighbor_params, *neighbor_params, token, limit)).fetchall()
 
     # 5. Trigram: Word + Word + Search (w w s)
     results['tri_w_w_s'] = safe_execute(conn, f"""
@@ -160,13 +165,13 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, 
         FROM prev2
         GROUP BY w0, w1
         ORDER BY freq DESC LIMIT ?
-    """, (token, *params, *neighbor_params, *neighbor_params, token, limit)).fetchall()
+    """, (*base_params, *params, *neighbor_params, *neighbor_params, token, limit)).fetchall()
     
     if not is_shared:
         conn.close()
     return results
 
-def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), stop_words=None, allowed_words=None, skip_punct=True):
+def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), stop_words=None, allowed_words=None, skip_punct=True, pos_tag=None):
     conn, is_shared = get_connection()
     if stop_words is None: stop_words = []
     
@@ -188,7 +193,10 @@ def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), sto
         if not is_shared: conn.close()
         return []
     
-    node_freq = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE token ILIKE ? AND {where_clause}", (token, *params)).fetchone()[0]
+    if pos_tag:
+        node_freq = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE token ILIKE ? AND tag = ? AND {where_clause}", (token, pos_tag, *params)).fetchone()[0]
+    else:
+        node_freq = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE token ILIKE ? AND {where_clause}", (token, *params)).fetchone()[0]
     if node_freq == 0:
         if not is_shared: conn.close()
         return []
@@ -196,20 +204,36 @@ def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), sto
     final_filter_sql = base_filter_sql + filter_sql
     final_params = base_filter_params + filter_params
     
-    collocan_counts = safe_execute(conn, f"""
-        WITH node_ids AS (
-            SELECT id, file_id FROM tokens WHERE token ILIKE ? AND {where_clause}
-        )
-        SELECT t2.token, COUNT(*) as O11
-        FROM node_ids n
-        JOIN tokens t2 ON t2.file_id = n.file_id 
-            AND t2.id BETWEEN n.id - ? AND n.id + ?
-            AND t2.id != n.id
-        WHERE {where_clause} {final_filter_sql}
-        GROUP BY t2.token
-        ORDER BY O11 DESC
-        LIMIT 200 
-    """, (token, *params, window, window, *params, *final_params)).fetchall()
+    if pos_tag:
+        collocan_counts = safe_execute(conn, f"""
+            WITH node_ids AS (
+                SELECT id, file_id FROM tokens WHERE token ILIKE ? AND tag = ? AND {where_clause}
+            )
+            SELECT t2.token, COUNT(*) as O11
+            FROM node_ids n
+            JOIN tokens t2 ON t2.file_id = n.file_id 
+                AND t2.id BETWEEN n.id - ? AND n.id + ?
+                AND t2.id != n.id
+            WHERE {where_clause} {final_filter_sql}
+            GROUP BY t2.token
+            ORDER BY O11 DESC
+            LIMIT 200 
+        """, (token, pos_tag, *params, window, window, *params, *final_params)).fetchall()
+    else:
+        collocan_counts = safe_execute(conn, f"""
+            WITH node_ids AS (
+                SELECT id, file_id FROM tokens WHERE token ILIKE ? AND {where_clause}
+            )
+            SELECT t2.token, COUNT(*) as O11
+            FROM node_ids n
+            JOIN tokens t2 ON t2.file_id = n.file_id 
+                AND t2.id BETWEEN n.id - ? AND n.id + ?
+                AND t2.id != n.id
+            WHERE {where_clause} {final_filter_sql}
+            GROUP BY t2.token
+            ORDER BY O11 DESC
+            LIMIT 200 
+        """, (token, *params, window, window, *params, *final_params)).fetchall()
     
     results = []
     for collocate, O11 in collocan_counts:
