@@ -54,3 +54,20 @@ def get_metrics(token, where_clause="1=1", params=(), pos_tag=None):
         'zipf': band,
         'total_subset': total_tokens
     }
+
+def get_max_frequency(where_clause="1=1", params=()):
+    """Returns the count of the most frequent token in the filtered corpus."""
+    conn, is_shared = get_connection()
+    # Find max frequency
+    query = f"""
+        SELECT COUNT(*) as cnt 
+        FROM tokens 
+        WHERE {where_clause} 
+        GROUP BY token 
+        ORDER BY cnt DESC 
+        LIMIT 1
+    """
+    res = safe_execute(conn, query, params).fetchone()
+    if not is_shared:
+        conn.close()
+    return res[0] if res else 1  # Avoid div by zero

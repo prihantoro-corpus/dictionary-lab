@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import eng_to_ipa as ipa
 import json
-from pipeline import search
+from pipeline import search, cache_manager as cache
 from stats import frequency, collocation, kwic
 from wordlist import manager
 from layout import components
@@ -22,9 +22,11 @@ def cb_update_query(new_term):
     """Callback to update search query."""
     st.session_state.search_box = new_term
 
-def cb_update_query(new_term):
-    """Callback to update search query."""
-    st.session_state.search_box = new_term
+def cb_search_token(token):
+    """Callback to search for a token and switch to Search tab."""
+    st.session_state.search_box = token
+    st.session_state.main_nav = "Search"
+
 
 def render_clickable_word_row(label, words, key_prefix="nav", context=""):
     if not words: return
@@ -118,8 +120,18 @@ def render_entry_tab(where_clause, params):
     c2.metric("Total Lemmas", f"{stats['total_lemmas']:,}")
     c3.metric("Unique POS Tags", len(stats['pos_tags']))
     
-    with st.expander("View POS Tags"):
-        st.write(", ".join(stats['pos_tags']))
+    
+    # Display POS Tags as Badges
+    st.caption("**POS Tags:**")
+    if stats['pos_tags']:
+        badges_html = "<div style='margin-top: 8px; margin-bottom: 12px;'>" + " ".join([
+            f"<span style='background:#e3f2fd; color:#1976d2; padding:4px 8px; border-radius:4px; font-size:13px; margin-right:6px; display:inline-block; margin-bottom:4px;'>{tag}</span>" 
+            for tag in sorted(stats['pos_tags'])
+        ]) + "</div>"
+        st.markdown(badges_html, unsafe_allow_html=True)
+    else:
+        st.write("No POS tags found.")
+    
         
     st.divider()
     st.subheader("Frequency List")
@@ -144,28 +156,45 @@ def render_entry_tab(where_clause, params):
     # Sort: Definition (Desc -> items with def first), then Freq (Desc)
     df = df.sort_values(by=['Definition', 'freq'], ascending=[False, False])
     
-    # 3. Interactive Table
-    event = st.dataframe(
-        df,
-        column_order=("token", "freq", "Definition"),
-        column_config={
-            "token": st.column_config.TextColumn("Token"),
-            "freq": st.column_config.NumberColumn("Frequency"),
-            "Definition": st.column_config.TextColumn("Definition", width="large")
-        },
-        use_container_width=True,
-        hide_index=True,
-        on_select="rerun",
-        selection_mode="single-row"
-    )
+    # 3. Interactive Table with clickable tokens
+    # Display with pagination
+    items_per_page = 50
+    total_items = len(df)
+    total_pages = (total_items - 1) // items_per_page + 1
     
-    if event.selection.rows:
-        idx = event.selection.rows[0]
-        selected_token = df.iloc[idx]['token']
-        # Redirect
-        st.session_state.search_box = selected_token
-        st.session_state.main_nav = "Search"
-        st.rerun()
+    if 'freq_list_page' not in st.session_state:
+        st.session_state.freq_list_page = 0
+    
+    page = st.session_state.freq_list_page
+    start_idx = page * items_per_page
+    end_idx = min(start_idx + items_per_page, total_items)
+    
+    df_page = df.iloc[start_idx:end_idx].reset_index(drop=True)
+    
+    # Display table with clickable tokens
+    for idx, row in df_page.iterrows():
+        col1, col2, col3 = st.columns([2, 1, 4])
+        with col1:
+            st.button(row['token'], key=f"tok_{start_idx + idx}", use_container_width=True, 
+                     on_click=cb_search_token, args=(row['token'],))
+        with col2:
+            st.write(f"**{row['freq']}**")
+        with col3:
+            st.write(row['Definition'][:100] + "..." if len(row['Definition']) > 100 else row['Definition'])
+    
+    # Pagination controls
+    if total_pages > 1:
+        col_prev, col_info, col_next = st.columns([1, 2, 1])
+        with col_prev:
+            if st.button("← Previous", disabled=(page == 0)):
+                st.session_state.freq_list_page = max(0, page - 1)
+                st.rerun()
+        with col_info:
+            st.write(f"Page {page + 1} of {total_pages} ({start_idx + 1}-{end_idx} of {total_items})")
+        with col_next:
+            if st.button("Next →", disabled=(page >= total_pages - 1)):
+                st.session_state.freq_list_page = min(total_pages - 1, page + 1)
+                st.rerun()
 
 def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_punct):
     # Search input - the widget automatically syncs with st.session_state.search_box
@@ -217,6 +246,10 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
         corpus_tags = list(grouped.groups.keys()) if grouped is not None else []
         all_display_tags = sorted(list(set(corpus_tags + list(query_overrides.keys()))))
         
+        # Calculate Corpus Hash (for Caching)
+        # We use the total token count of the current filtered corpus as a proxy for versioning.
+        corpus_hash = frequency.get_total_tokens(where_clause, params)
+        
         # Sense Tabs + Add Sense
         sense_labels = [f"Sense: {tag}" for tag in all_display_tags]
         sense_labels.append("➕ Add Sense")
@@ -248,7 +281,8 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                 pron = override.get('pronunciation') or default_pron
                 
                 # Check metrics (Per Sense)
-                metrics_corpus = frequency.get_metrics(query, where_clause, params, pos_tag=tag)
+                # Check metrics (Per Sense)
+                metrics_corpus = cache.get_metrics(corpus_hash, query, where_clause, params, pos_tag=tag)
                 
                 freq = override.get('frequency') if 'frequency' in override else metrics_corpus['frequency']
                 is_manual_freq = 'frequency' in override
@@ -283,6 +317,23 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                         badges_html = " ".join([f"<span style='background:#e0f2f1; color:#00695c; padding:2px 6px; border-radius:4px; font-size:12px; margin-right:4px;'>{b['name']} {b['value']}</span>" for b in wl_badges])
                         st.markdown(badges_html, unsafe_allow_html=True)
                 with m3:
+                     # Get max frequency for relative PMW calculation
+                     max_freq = cache.get_max_frequency(corpus_hash, where_clause, params)
+                     pct_max = (freq / max_freq * 100) if max_freq > 0 else 0
+                     pct_max = min(100, max(1, pct_max))  # Clamp between 1% and 100%
+                     
+                     # PMW Bar (Relative to Max)
+                     st.caption("PMW (Relative)")
+                     st.markdown(f"""
+                     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                         <span style="font-weight: bold; font-size: 1em;">{pmw_val:.1f}</span>
+                     </div>
+                     <div style="background-color: #e0e0e0; width: 100%; height: 8px; border-radius: 4px; margin-bottom: 4px;">
+                         <div style="background-color: #2196F3; width: {pct_max:.1f}%; height: 100%; border-radius: 4px;"></div>
+                     </div>
+                     <div style="font-size: 0.7em; color: #666; margin-bottom: 8px;">{pct_max:.1f}% of Max</div>
+                     """, unsafe_allow_html=True)
+                     
                      # Visual Zipf Band
                      bars_html = ""
                      for i in range(1, 6):
@@ -341,7 +392,7 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                         'tri_w_w_s': []
                     }
                 else:
-                    ngrams = collocation.get_ngrams(query, where_clause=where_clause, params=params, stop_words=stop_words, skip_punct=skip_punct, pos_tag=tag)
+                    ngrams = cache.get_ngrams(corpus_hash, query, where_clause=where_clause, params=params, stop_words=stop_words, skip_punct=skip_punct, pos_tag=tag)
 
                 c_bi, c_tri = st.columns([4, 6])
                 
@@ -406,7 +457,7 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                 if coll_over:
                     collocs = [{'collocate': r[0], 'score': float(r[1]) if len(r)>1 and r[1].replace('.', '', 1).isdigit() else 0.0, 'freq': 0} for r in coll_over]
                 else:
-                    collocs = collocation.get_collocates(query, limit=26, where_clause=where_clause, params=params, stop_words=stop_words, allowed_words=collocate_filter, skip_punct=skip_punct, pos_tag=tag)
+                    collocs = cache.get_collocates(corpus_hash, query, limit=26, where_clause=where_clause, params=params, stop_words=stop_words, allowed_words=collocate_filter, skip_punct=skip_punct, pos_tag=tag)
                 
                 if collocs:
                     limit_n = 20
@@ -450,7 +501,7 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                 if ex_over:
                     kwic_lines = [{'left': r[0], 'node': r[1], 'right': r[2]} for r in ex_over if len(r) >= 3]
                 else:
-                    kwic_lines = kwic.get_kwic_lines(query, where_clause=where_clause, params=params, limit=10, pos_tag=tag)
+                    kwic_lines = cache.get_kwic_lines(corpus_hash, query, where_clause=where_clause, params=params, limit=10, pos_tag=tag)
                 
                 if kwic_lines:
                      df_kwic = pd.DataFrame(kwic_lines)
@@ -498,7 +549,7 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                     if top_collocs:
                          for col_word in top_collocs:
                             with st.expander(f"Usage with '{col_word}'", expanded=False):
-                                col_examples = kwic.get_collocate_kwic(query, col_word, where_clause=where_clause, params=params, limit=3, pos_tag=tag)
+                                col_examples = cache.get_collocate_kwic(corpus_hash, query, col_word, where_clause=where_clause, params=params, limit=3, pos_tag=tag)
                                 if col_examples:
                                     for ex in col_examples:
                                          components.render_collocate_example(ex['left'], ex['node'], ex['right'], ex['col_token'])
@@ -582,11 +633,14 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
 @st.cache_data(show_spinner=False)
 def get_cached_candidates(token, tag, type, collocate_word, where_clause, params):
     """Cached wrapper to ensure stable dataframe generation for data_editor."""
+    # We recalculate hash here or pass it? Better to recalculate to keep signature simple for this specific component
+    corpus_hash = frequency.get_total_tokens(where_clause, params)
+    
     if type == "general":
-        return kwic.get_kwic_lines(token, where_clause=where_clause, params=params, limit=50, pos_tag=tag)
+        return cache.get_kwic_lines(corpus_hash, token, where_clause=where_clause, params=params, limit=50, pos_tag=tag)
     else:
         # Collocate
-        return kwic.get_collocate_kwic(token, collocate_word, where_clause=where_clause, params=params, limit=50, pos_tag=tag)
+        return cache.get_collocate_kwic(corpus_hash, token, collocate_word, where_clause=where_clause, params=params, limit=50, pos_tag=tag)
 
 @st.dialog("Choose Concordance Lines", width="large")
 def open_selection_dialog(token, tag, type, collocate_word=None, where_clause="1=1", params=()):
