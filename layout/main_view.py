@@ -563,27 +563,36 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                 if collocs:
                     limit_n = 20
                     collocs_subset = collocs[:limit_n]
-                    chunk_size = 5
-                    chunks = [collocs_subset[i:i + chunk_size] for i in range(0, len(collocs_subset), chunk_size)]
                     
-                    cols_grid = st.columns(4)
+                    # Create Tabs
+                    c_tab1, c_tab2 = st.tabs(["📋 List View", "🕸️ Network Graph"])
                     
-                    for col_idx, chunk in enumerate(chunks):
-                        if col_idx < 4:
-                            with cols_grid[col_idx]:
-                                for item in chunk:
-                                    col_txt = item['collocate']
-                                    score_val = item.get('score', item.get('LL', 0))
-                                    freq_val = item.get('freq', 0)
-                                    
-                                    if st.button(
-                                        f"{col_txt} ({score_val:.1f})", 
-                                        key=f"coll_{col_txt}_{tag}", 
-                                        help=f"Frequency: {freq_val}\nLog-Likelihood: {score_val:.2f}",
-                                        use_container_width=True
-                                    ):
-                                        st.session_state.query = col_txt
-                                        st.rerun()
+                    with c_tab1:
+                        chunk_size = 5
+                        chunks = [collocs_subset[i:i + chunk_size] for i in range(0, len(collocs_subset), chunk_size)]
+                        
+                        cols_grid = st.columns(4)
+                        
+                        for col_idx, chunk in enumerate(chunks):
+                            if col_idx < 4:
+                                with cols_grid[col_idx]:
+                                    for item in chunk:
+                                        col_txt = item['collocate']
+                                        score_val = item.get('score', item.get('LL', 0))
+                                        freq_val = item.get('freq', 0)
+                                        
+                                        if st.button(
+                                            f"{col_txt} ({score_val:.1f})", 
+                                            key=f"coll_{col_txt}_{tag}", 
+                                            help=f"Frequency: {freq_val}\nLog-Likelihood: {score_val:.2f}",
+                                            use_container_width=True
+                                        ):
+                                            st.session_state.query = col_txt
+                                            st.rerun()
+                    
+                    with c_tab2:
+                        st.caption("Collocates positioned by left/right dominance. Distance = Strength.")
+                        components.render_collocate_chart(collocs_subset, node_word=query)
                     
                     st.divider()
                     

@@ -22,7 +22,7 @@ def get_ngrams(corpus_hash, token, limit=10, where_clause="1=1", params=(), stop
     return collocation.get_ngrams(token, limit, where_clause, params, stop_words, skip_punct, pos_tag)
 
 @st.cache_data(persist="disk", show_spinner=False)
-def get_collocates(corpus_hash, token, window=5, limit=20, where_clause="1=1", params=(), stop_words=None, allowed_words=None, skip_punct=True, pos_tag=None):
+def get_collocates(corpus_hash, token, window=5, limit=20, where_clause="1=1", params=(), stop_words=None, allowed_words=None, skip_punct=True, pos_tag=None, v=2):
     return collocation.get_collocates(token, window, limit, where_clause, params, stop_words, allowed_words, skip_punct, pos_tag)
 
 @st.cache_data(persist="disk", show_spinner=False)

@@ -209,7 +209,9 @@ def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), sto
             WITH node_ids AS (
                 SELECT id, file_id FROM tokens WHERE token ILIKE ? AND tag = ? AND {where_clause}
             )
-            SELECT t2.token, COUNT(*) as O11
+            SELECT t2.token, COUNT(*) as O11, 
+                   SUM(CASE WHEN t2.id < n.id THEN 1 ELSE 0 END) as left_count, 
+                   SUM(CASE WHEN t2.id > n.id THEN 1 ELSE 0 END) as right_count
             FROM node_ids n
             JOIN tokens t2 ON t2.file_id = n.file_id 
                 AND t2.id BETWEEN n.id - ? AND n.id + ?
@@ -224,7 +226,9 @@ def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), sto
             WITH node_ids AS (
                 SELECT id, file_id FROM tokens WHERE token ILIKE ? AND {where_clause}
             )
-            SELECT t2.token, COUNT(*) as O11
+            SELECT t2.token, COUNT(*) as O11, 
+                   SUM(CASE WHEN t2.id < n.id THEN 1 ELSE 0 END) as left_count, 
+                   SUM(CASE WHEN t2.id > n.id THEN 1 ELSE 0 END) as right_count
             FROM node_ids n
             JOIN tokens t2 ON t2.file_id = n.file_id 
                 AND t2.id BETWEEN n.id - ? AND n.id + ?
@@ -236,7 +240,7 @@ def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), sto
         """, (token, *params, window, window, *params, *final_params)).fetchall()
     
     results = []
-    for collocate, O11 in collocan_counts:
+    for collocate, O11, left_cnt, right_cnt in collocan_counts:
         # Use ILIKE for collocate frequency to match the node's broad matching
         col_freq = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE token ILIKE ? AND {where_clause}", (collocate, *params)).fetchone()[0]
         
@@ -272,7 +276,13 @@ def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), sto
             if O11 < E11:
                 LL = -LL
             
-            results.append({'collocate': collocate, 'freq': O11, 'score': LL})
+            results.append({
+                'collocate': collocate, 
+                'freq': O11, 
+                'score': LL,
+                'left': left_cnt, 
+                'right': right_cnt
+            })
         except Exception as e:
             # Silent skip for math errors
             continue
