@@ -14,6 +14,10 @@ def get_max_frequency(corpus_hash, where_clause="1=1", params=()):
     return frequency.get_max_frequency(where_clause, params)
 
 @st.cache_data(persist="disk", show_spinner=False)
+def get_pmw_range(corpus_hash, where_clause="1=1", params=()):
+    return frequency.get_pmw_range(where_clause, params)
+
+@st.cache_data(persist="disk", show_spinner=False)
 def get_ngrams(corpus_hash, token, limit=10, where_clause="1=1", params=(), stop_words=None, skip_punct=True, pos_tag=None):
     return collocation.get_ngrams(token, limit, where_clause, params, stop_words, skip_punct, pos_tag)
 

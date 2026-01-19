@@ -2,6 +2,7 @@
 import streamlit as st
 import pandas as pd
 import eng_to_ipa as ipa
+from utils import indo_g2p
 import json
 from pipeline import search, cache_manager as cache
 from stats import frequency, collocation, kwic
@@ -134,7 +135,11 @@ def render_entry_tab(where_clause, params):
     
         
     st.divider()
-    st.subheader("Frequency List")
+    
+    # Header with download button
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.subheader("Frequency List")
     
     # 2. Data
     df = search.get_full_frequency_list(where_clause, params)
@@ -155,6 +160,21 @@ def render_entry_tab(where_clause, params):
     
     # Sort: Definition (Desc -> items with def first), then Freq (Desc)
     df = df.sort_values(by=['Definition', 'freq'], ascending=[False, False])
+    
+    # Excel download button
+    from io import BytesIO
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+        df.to_excel(writer, sheet_name='Frequency List', index=False)
+    buffer.seek(0)
+    
+    with col2:
+        st.download_button(
+            label="📥 Excel",
+            data=buffer,
+            file_name="frequency_list.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
     
     # 3. Interactive Table with clickable tokens
     # Display with pagination
@@ -274,10 +294,24 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                 curr_def = override.get('definition') or st.session_state.get(def_key, "")
                 
                 # Header - Professional Style
-                try:
-                    default_pron = ipa.convert(query)
-                except:
-                    default_pron = query
+                # Get language setting
+                language = st.session_state.get('corpus_language', 'English')
+                
+                # Generate pronunciation based on language
+                if language == 'English':
+                    try:
+                        default_pron = ipa.convert(query)
+                    except:
+                        default_pron = query
+                elif language == 'Indonesian':
+                    try:
+                        default_pron = indo_g2p.convert(query)
+                    except:
+                        default_pron = query
+                else:
+                    # Other languages - no transcription
+                    default_pron = ""
+                
                 pron = override.get('pronunciation') or default_pron
                 
                 # Check metrics (Per Sense)
@@ -300,57 +334,124 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                     pmw_val = metrics_corpus.get('pmw', 0)
                     zipf_val = metrics_corpus.get('zipf', 1)
 
-                # Standard Streamlit Header (Restored)
+                # Consolidated Header - All on one line
                 st.header(f"{query}")
-                st.markdown(f"**/{pron}/** *{tag}*")
                 
-                # Metadata Row
-                m1, m2, m3 = st.columns([2, 4, 3])
-                with m1:
-                    st.caption(f"Freq: **{freq}** {'(Manual)' if is_manual_freq else ''}")
-                with m2:
+                # Build pronunciation links based on language
+                pron_links_html = ""
+                if language == 'English' and pron:
+                    us_link = f"https://youglish.com/pronounce/{query}/english/us"
+                    uk_link = f"https://youglish.com/pronounce/{query}/english/uk"
+                    pron_links_parts = [
+                        f"<a href=\"{us_link}\" target=\"_blank\" title=\"US Pronunciation\" style=\"text-decoration: none; font-size: 20px;\">🎤 US</a>",
+                        f"<a href=\"{uk_link}\" target=\"_blank\" title=\"UK Pronunciation\" style=\"text-decoration: none; font-size: 20px;\">🎤 UK</a>"
+                    ]
+                    pron_links_html = " ".join(pron_links_parts)
+                elif language == 'Indonesian' and pron:
+                    # Indonesian pronunciation (could add Indonesian audio links if desired)
+                    pron_links_html = "<span style=\"font-size: 18px; color: #666;\">🇮🇩</span>"
+                
+                # Build wordlist badges (only for English)
+                wl_badges = []
+                if language == 'English':
                     wl_badges = manager.check_token(query, lemma=lemma)
-                    wl_badges.append({'name': 'PMW', 'value': f"{pmw_val:.2f}"})
-                    wl_badges.append({'name': 'Zipf', 'value': str(zipf_val)})
-                    
-                    if wl_badges:
-                        badges_html = " ".join([f"<span style='background:#e0f2f1; color:#00695c; padding:2px 6px; border-radius:4px; font-size:12px; margin-right:4px;'>{b['name']} {b['value']}</span>" for b in wl_badges])
-                        st.markdown(badges_html, unsafe_allow_html=True)
-                with m3:
-                     # Get max frequency for relative PMW calculation
-                     max_freq = cache.get_max_frequency(corpus_hash, where_clause, params)
-                     pct_max = (freq / max_freq * 100) if max_freq > 0 else 0
-                     pct_max = min(100, max(1, pct_max))  # Clamp between 1% and 100%
-                     
-                     # PMW Bar (Relative to Max)
-                     st.caption("PMW (Relative)")
-                     st.markdown(f"""
-                     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-                         <span style="font-weight: bold; font-size: 1em;">{pmw_val:.1f}</span>
-                     </div>
-                     <div style="background-color: #e0e0e0; width: 100%; height: 8px; border-radius: 4px; margin-bottom: 4px;">
-                         <div style="background-color: #2196F3; width: {pct_max:.1f}%; height: 100%; border-radius: 4px;"></div>
-                     </div>
-                     <div style="font-size: 0.7em; color: #666; margin-bottom: 8px;">{pct_max:.1f}% of Max</div>
-                     """, unsafe_allow_html=True)
-                     
-                     # Visual Zipf Band
-                     bars_html = ""
-                     for i in range(1, 6):
-                         color = "#1d2a57" if i <= zipf_val else "#e0e0e0"
-                         bars_html += f"<span style='display:inline-block; width:6px; height:10px; background-color:{color}; margin-right:2px; border-radius:1px;'></span>"
-                     
-                     st.markdown(f"""
-                     <div style="display:flex; align-items:center; opacity:0.8;" title="Visual Frequency Band">
-                        {bars_html}
-                     </div>
-                     """, unsafe_allow_html=True)
+                
+                # Get PMW range for relative percentage calculation
+                pmw_range = cache.get_pmw_range(corpus_hash, where_clause, params)
+                min_pmw = pmw_range['min_pmw']
+                max_pmw = pmw_range['max_pmw']
+                
+                # Calculate percentage position in PMW range
+                if max_pmw > min_pmw:
+                    pmw_pct = ((pmw_val - min_pmw) / (max_pmw - min_pmw)) * 100
+                    pmw_pct = min(100, max(1, pmw_pct))  # Clamp between 1% and 100%
+                else:
+                    pmw_pct = 100
+                
+                # PMW Visual Band (Single line construction to avoid Markdown issues)
+                pmw_band_parts = [
+                    f"<div style=\"display:inline-flex; flex-direction:column; align-items:flex-start; margin-right:12px; background:#f5f5f5; padding:6px 10px; border-radius:4px;\">",
+                    f"<span style=\"font-size:12px; color:#666; margin-bottom:2px;\">PMW</span>",
+                    f"<div style=\"display:flex; align-items:center; gap:6px;\">",
+                    f"<span style=\"font-weight:bold; font-size:18px; min-width:60px;\">{pmw_val:.2f}</span>",
+                    f"<div style=\"background-color:#e0e0e0; width:120px; height:12px; border-radius:6px; overflow:hidden;\">",
+                    f"<div style=\"background-color:#2196F3; width:{pmw_pct:.1f}%; height:100%;\"></div>",
+                    f"</div>",
+                    f"<span style=\"font-size:11px; color:#888;\">{pmw_pct:.0f}%</span>",
+                    f"</div>",
+                    f"</div>"
+                ]
+                pmw_band_html = "".join(pmw_band_parts)
+                
+                # Zipf Visual Band (5 bars)
+                zipf_bars = []
+                for i in range(1, 6):
+                    color = "#1d2a57" if i <= zipf_val else "#e0e0e0"
+                    zipf_bars.append(f"<div style=\"width:10px; height:20px; background-color:{color}; border-radius:2px;\"></div>")
+                
+                # Tooltip text for Zipf band
+                zipf_tooltip = "Zipf Scale (Frequency per Million Words):&#10;Band 1: < 1 (Very Low)&#10;Band 2: 1 - 10 (Low)&#10;Band 3: 10 - 100 (Medium)&#10;Band 4: 100 - 1,000 (High)&#10;Band 5: > 1,000 (Very High)"
+                
+                zipf_band_parts = [
+                    f"<div title=\"{zipf_tooltip}\" style=\"display:inline-flex; flex-direction:column; align-items:center; background:#f5f5f5; padding:6px 10px; border-radius:4px; cursor:help;\">",
+                    f"<span style=\"font-size:12px; color:#666; margin-bottom:4px;\">Zipf {zipf_val}</span>",
+                    f"<div style=\"display:flex; gap:3px;\">",
+                    " ".join(zipf_bars),
+                    f"</div>",
+                    f"</div>"
+                ]
+                zipf_band_html = "".join(zipf_band_parts)
+                
+                # Pronunciation display (conditional)
+                pron_display = ""
+                if pron:
+                    pron_display = f"<span style=\"font-size: 24px; font-weight: bold;\">/{pron}/</span>"
+                
+                # Build badges HTML string
+                badges_list = []
+                # POS tag badge
+                badges_list.append(f"<span style=\"background:#1976d2; color:#ffffff; padding:4px 10px; border-radius:4px; font-size:24px; margin-right:6px; font-weight:bold;\">{tag}</span>")
+                # Wordlist badges (only for English)
+                if wl_badges:
+                    for b in wl_badges:
+                        badges_list.append(f"<span style=\"background:#e0f2f1; color:#00695c; padding:4px 10px; border-radius:4px; font-size:24px; margin-right:6px;\">{b['name']} {b['value']}</span>")
+                
+                badges_html = " ".join(badges_list)
+                
+                # Build complete HTML for metadata row
+                html_parts = [pron_display, pron_links_html]
+                html_parts.append(f"<span style=\"font-size: 24px;\">Freq: <strong>{freq}</strong> {'(Manual)' if is_manual_freq else ''}</span>")
+                html_parts.append(badges_html)
+                html_parts.append(pmw_band_html)
+                html_parts.append(zipf_band_html)
+                
+                # Filter out empty strings
+                html_parts = [p for p in html_parts if p]
+                
+                # Combine all parts
+                combined_html = " ".join(html_parts)
+                
+                # Render all metadata
+                st.markdown(f'<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">{combined_html}</div>', unsafe_allow_html=True)
                 # Definition Block
                 st.markdown(f"""
                 <div class="sense-block">
                     <div class="definition">{curr_def if curr_def else "<span style='color:#999; font-style:italic;'>No definition provided.</span>"}</div>
                 </div>
                 """, unsafe_allow_html=True)
+                
+                # Dictionary and Thesaurus Links (language-specific)
+                if language == 'English':
+                    st.markdown(f"<div style=\"font-size:12px; margin-top:5px;\"><a href=\"https://www.collinsdictionary.com/dictionary/english/{query}\" target=\"_blank\">Collins Dictionary</a> • <a href=\"https://www.collinsdictionary.com/dictionary/english-thesaurus/{query}\" target=\"_blank\">Thesaurus</a></div>", unsafe_allow_html=True)
+                elif language == 'Indonesian':
+                    # Single line construction for Indonesian links
+                    indo_links = [
+                        f"<a href=\"https://kbbi.kemendikdasmen.go.id/entri/{query}\" target=\"_blank\">KBBI (Kemendikbud)</a>",
+                        f"<a href=\"https://kbbi.web.id/{query}\" target=\"_blank\">KBBI (Web)</a>",
+                        f"<a href=\"https://tesaurus.kemendikdasmen.go.id/tematis/lema/{query}\" target=\"_blank\">Tesaurus</a>"
+                    ]
+                    st.markdown(f"<div style=\"font-size:12px; margin-top:5px;\">{' • '.join(indo_links)}</div>", unsafe_allow_html=True)
+                # For 'Other' languages, no dictionary links
                 
                 # Navigation Rows
                 render_clickable_word_row("Words from same Lemma", same_lemma_words, key_prefix="lemma", context=tag)

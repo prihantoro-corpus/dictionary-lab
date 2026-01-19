@@ -2,6 +2,7 @@ streamlit
 duckdb
 pandas
 openpyxl
+xlsxwriter
 matplotlib
 scikit-learn
 cefrpy

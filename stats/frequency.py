@@ -71,3 +71,51 @@ def get_max_frequency(where_clause="1=1", params=()):
     if not is_shared:
         conn.close()
     return res[0] if res else 1  # Avoid div by zero
+
+def get_pmw_range(where_clause="1=1", params=()):
+    """Returns the min and max PMW values in the filtered corpus."""
+    conn, is_shared = get_connection()
+    
+    # Get total tokens for PMW calculation
+    result = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE {where_clause}", params).fetchone()
+    total_tokens = result[0] if result else 0
+    
+    if total_tokens == 0:
+        if not is_shared:
+            conn.close()
+        return {'min_pmw': 0, 'max_pmw': 0}
+    
+    # Get max frequency token
+    query_max = f"""
+        SELECT COUNT(*) as cnt 
+        FROM tokens 
+        WHERE {where_clause} 
+        GROUP BY token 
+        ORDER BY cnt DESC 
+        LIMIT 1
+    """
+    res_max = safe_execute(conn, query_max, params).fetchone()
+    max_freq = res_max[0] if res_max else 0
+    
+    # Get min frequency token (minimum should be 1 if token exists)
+    query_min = f"""
+        SELECT COUNT(*) as cnt 
+        FROM tokens 
+        WHERE {where_clause} 
+        GROUP BY token 
+        ORDER BY cnt ASC 
+        LIMIT 1
+    """
+    res_min = safe_execute(conn, query_min, params).fetchone()
+    min_freq = res_min[0] if res_min else 1
+    
+    if not is_shared:
+        conn.close()
+    
+    max_pmw = (max_freq / total_tokens) * 1000000
+    min_pmw = (min_freq / total_tokens) * 1000000
+    
+    return {
+        'min_pmw': float(f"{min_pmw:.2f}"),
+        'max_pmw': float(f"{max_pmw:.2f}")
+    }

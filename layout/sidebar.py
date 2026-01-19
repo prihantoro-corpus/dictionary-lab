@@ -93,71 +93,181 @@ def get_metadata_values(key, corpora=None):
 def render():
     st.sidebar.title("DICTIONARY EDITOR")
     
-    # --- Management Section ---
-    with st.sidebar.expander("📁 Corpus Management", expanded=True):
-        manage_mode = st.radio("Add Corpus From:", ["Upload your file", "Use built-in corpora"], horizontal=True)
+    # --- Language Selection Section (FIRST) ---
+    with st.sidebar.expander("🌐 Language Selection", expanded=True):
+        st.caption("Select the language of your corpus:")
         
-        if manage_mode == "Upload your file":
-            uploaded_corpus = st.file_uploader("Upload Corpus (vertical, XML, etc.)", type=None, key="corpus_uploader")
-            if uploaded_corpus:
-                if st.button("⚙️ Process Uploaded File"):
-                    with st.spinner("Ingesting corpus..."):
-                        from pipeline import ingest
-                        tmp_fd, tmp_path = tempfile.mkstemp()
-                        try:
-                            with os.fdopen(tmp_fd, 'wb') as tmp:
-                                tmp.write(uploaded_corpus.getvalue())
-                            
-                            parser = ingest.CorpusParser()
-                            corpus_name_display = os.path.splitext(uploaded_corpus.name)[0]
-                            parser.process_file(tmp_path, corpus_name_display)
-                            
-                            # Exclusively stage the newly ingested corpus
-                            st.session_state['last_selection'] = [corpus_name_display]
-                            st.session_state['loaded_corpora'] = [] # Don't activate until "Load" is pressed
-                            st.success(f"✅ Ingested '{corpus_name_display}'. Now select it below and click 'Load Corpora'.")
-                        finally:
-                            if os.path.exists(tmp_path):
-                                os.remove(tmp_path)
-                        
-                        st.cache_data.clear()
-                        st.rerun()
+        # Initialize language in session state
+        if 'corpus_language' not in st.session_state:
+            st.session_state['corpus_language'] = 'English'
+        
+        language = st.selectbox(
+            "Corpus Language:",
+            options=['English', 'Indonesian', 'Other'],
+            index=['English', 'Indonesian', 'Other'].index(st.session_state['corpus_language']),
+            key="language_selector",
+            help="This determines which features are available. English: all features. Indonesian: IPA transcription + Indonesian dictionaries. Other: basic features only."
+        )
+        
+        st.session_state['corpus_language'] = language
+        
+        # Show language-specific info
+        if language == 'English':
+            st.success("✅ All features active")
+        elif language == 'Indonesian':
+            st.info("🇮🇩 Indonesian IPA + dictionaries active")
         else:
-            # Use built-in corpora
+            st.warning("⚠️ Limited features (no transcription/badges)")
+    
+    st.sidebar.divider()
+    
+    # --- Corpus Selection Section ---
+    with st.sidebar.expander("📁 Corpus Selection", expanded=True):
+        # Initialize session state for corpus selection
+        if 'corpus_selection_mode' not in st.session_state:
+            st.session_state['corpus_selection_mode'] = None
+        if 'staged_files' not in st.session_state:
+            st.session_state['staged_files'] = []
+        if 'staged_builtin' not in st.session_state:
+            st.session_state['staged_builtin'] = []
+        
+        # Step 1: Show initial selection buttons or the selected mode interface
+        if st.session_state['corpus_selection_mode'] is None:
+            st.caption("Choose how to add corpora:")
+            col1, col2 = st.columns(2)
+            
+            if col1.button("📤 File Upload", use_container_width=True):
+                st.session_state['corpus_selection_mode'] = "File Upload"
+                st.rerun()
+            
+            if col2.button("📚 Built-in Corpora", use_container_width=True):
+                st.session_state['corpus_selection_mode'] = "Built-in Corpora"
+                st.rerun()
+        
+        # Step 2: Show appropriate interface based on mode
+        elif st.session_state['corpus_selection_mode'] == "File Upload":
+            st.caption("📤 Upload one or more corpus files:")
+            uploaded_files = st.file_uploader(
+                "Select files",
+                type=None,
+                accept_multiple_files=True,
+                key="corpus_file_uploader"
+            )
+            
+            if uploaded_files:
+                st.session_state['staged_files'] = uploaded_files
+                st.info(f"📋 **{len(uploaded_files)} file(s) selected:**")
+                for f in uploaded_files:
+                    st.write(f"  • {f.name}")
+            else:
+                st.session_state['staged_files'] = []
+                st.caption("No files selected yet.")
+        
+        elif st.session_state['corpus_selection_mode'] == "Built-in Corpora":
+            st.caption("📚 Select from available built-in corpora:")
             disk_corpora_map = get_disk_corpora()
-            indexed_corpora = get_corpora()
             
             # Helper to map common filenames to cleaner names
             def clean_name(n):
                 if "EN-BPPT" in n: return "EN-BPPT"
                 if "KOSLAT" in n: return "KOSLAT"
                 return n
-
-            available_on_disk = [c for c in disk_corpora_map.keys() if clean_name(c) not in indexed_corpora]
             
-            if not available_on_disk:
-                st.caption("All built-in corpora are already indexed.")
-                if st.button("🔄 Refresh List"):
-                    st.cache_data.clear()
-                    st.rerun()
+            # Get all available corpora (clean names)
+            available_corpora = sorted([clean_name(c) for c in disk_corpora_map.keys()])
+            
+            if not available_corpora:
+                st.warning("No built-in corpora found in the corpora/ folder.")
             else:
-                st.caption("Available built-in files found:")
-                for c in available_on_disk:
-                    display_n = clean_name(c)
-                    cols = st.columns([3, 1])
-                    cols[0].write(f"📄 {display_n}")
-                    if cols[1].button("📥 Index", key=f"index_btn_{c}"):
-                        with st.status(f"Indexing '{display_n}'...", expanded=True) as status:
-                            from pipeline import ingest
-                            parser = ingest.CorpusParser()
-                            f_path = os.path.join(CORPORA_DIR, disk_corpora_map[c])
-                            parser.process_file(f_path, display_n)
-                            status.update(label=f"Finished indexing {display_n}!", state="complete", expanded=False)
-                        
-                        # Just Stage it, don't auto-load
-                        st.session_state['last_selection'] = list(set(st.session_state.get('last_selection', []) + [display_n]))
-                        st.cache_data.clear()
-                        st.rerun()
+                selected_builtin = st.multiselect(
+                    "Choose corpora:",
+                    options=available_corpora,
+                    default=st.session_state.get('staged_builtin', []),
+                    key="builtin_corpus_multiselect"
+                )
+                st.session_state['staged_builtin'] = selected_builtin
+                
+                if selected_builtin:
+                    st.info(f"📋 **{len(selected_builtin)} corpus/corpora selected:**")
+                    for c in selected_builtin:
+                        st.write(f"  • {c}")
+                else:
+                    st.caption("No corpora selected yet.")
+        
+        # Step 3: Load Corpus button
+        st.divider()
+        has_staged_content = (
+            (st.session_state['corpus_selection_mode'] == "File Upload" and st.session_state['staged_files']) or
+            (st.session_state['corpus_selection_mode'] == "Built-in Corpora" and st.session_state['staged_builtin'])
+        )
+        
+        if st.button("🚀 Load Corpus", type="primary", use_container_width=True, disabled=not has_staged_content):
+            loaded_names = []
+            
+            # Process file uploads
+            if st.session_state['corpus_selection_mode'] == "File Upload" and st.session_state['staged_files']:
+                from pipeline import ingest
+                parser = ingest.CorpusParser()
+                
+                for uploaded_file in st.session_state['staged_files']:
+                    with st.spinner(f"Processing {uploaded_file.name}..."):
+                        tmp_fd, tmp_path = tempfile.mkstemp()
+                        try:
+                            with os.fdopen(tmp_fd, 'wb') as tmp:
+                                tmp.write(uploaded_file.getvalue())
+                            
+                            corpus_name_display = os.path.splitext(uploaded_file.name)[0]
+                            parser.process_file(tmp_path, corpus_name_display)
+                            loaded_names.append(corpus_name_display)
+                        finally:
+                            if os.path.exists(tmp_path):
+                                os.remove(tmp_path)
+            
+            # Process built-in corpora
+            elif st.session_state['corpus_selection_mode'] == "Built-in Corpora" and st.session_state['staged_builtin']:
+                from pipeline import ingest
+                parser = ingest.CorpusParser()
+                disk_corpora_map = get_disk_corpora()
+                
+                # Helper to map common filenames to cleaner names
+                def clean_name(n):
+                    if "EN-BPPT" in n: return "EN-BPPT"
+                    if "KOSLAT" in n: return "KOSLAT"
+                    return n
+                
+                # Create reverse mapping: clean_name -> disk_key
+                clean_to_disk = {clean_name(k): k for k in disk_corpora_map.keys()}
+                
+                for corpus_clean_name in st.session_state['staged_builtin']:
+                    with st.spinner(f"Loading {corpus_clean_name}..."):
+                        if corpus_clean_name in clean_to_disk:
+                            disk_key = clean_to_disk[corpus_clean_name]
+                            f_path = os.path.join(CORPORA_DIR, disk_corpora_map[disk_key])
+                            parser.process_file(f_path, corpus_clean_name)
+                            loaded_names.append(corpus_clean_name)
+            
+            # Activate loaded corpora immediately
+            if loaded_names:
+                current_loaded = st.session_state.get('loaded_corpora', [])
+                st.session_state['loaded_corpora'] = list(set(current_loaded + loaded_names))
+                st.session_state['last_selection'] = st.session_state['loaded_corpora']
+                
+                # Clear staged items
+                st.session_state['staged_files'] = []
+                st.session_state['staged_builtin'] = []
+                st.session_state['corpus_selection_mode'] = None
+                
+                st.cache_data.clear()
+                st.success(f"✅ Loaded {len(loaded_names)} corpus/corpora. Now fully searchable!")
+                st.rerun()
+        
+        # Reset button
+        if st.session_state['corpus_selection_mode'] is not None:
+            if st.button("↩️ Back to Selection", use_container_width=True):
+                st.session_state['corpus_selection_mode'] = None
+                st.session_state['staged_files'] = []
+                st.session_state['staged_builtin'] = []
+                st.rerun()
 
     # --- Personal Overrides File (Persistence) ---
     with st.sidebar.expander("🛠️ Personal Overrides Management", expanded=True):
@@ -221,79 +331,16 @@ def render():
 
     # --- Active Search & Filtering ---
     st.sidebar.divider()
-    st.sidebar.title("🔍 CORPUS SEARCH")
     
-    indexed_corpora = get_corpora()
-    disk_corpora_map = get_disk_corpora()
-    
-    # Helper to map common filenames to cleaner names
-    def clean_name(n):
-        if "EN-BPPT" in n: return "EN-BPPT"
-        if "KOSLAT" in n: return "KOSLAT"
-        return n
-
-    # Create a mapping of clean_name -> actual_key/disk_filename for reverse lookup
-    clean_to_disk = {clean_name(k): k for k in disk_corpora_map.keys()}
-    
-    # All display options: combines indexed names and cleaned disk names
-    all_options = sorted(list(set(indexed_corpora) | set(clean_to_disk.keys())))
-    
-    # Reset default if nothing set (Ensure clean startup)
-    if 'last_selection' not in st.session_state:
-        st.session_state['last_selection'] = []
-    
+    # Check if corpora are loaded
     if 'loaded_corpora' not in st.session_state:
         st.session_state['loaded_corpora'] = []
-
-    default_sel = [v for v in st.session_state['last_selection'] if v in all_options]
     
     active_corpora = st.session_state['loaded_corpora']
     
-    if not active_corpora:
-        st.sidebar.warning("⚠️ No Corpora Loaded")
-    else:
-        st.sidebar.success(f"Loaded: {len(active_corpora)} items")
-
-    selection = st.sidebar.multiselect(
-        "Choose corpora to index/load:",
-        options=all_options,
-        default=default_sel,
-        key="corpus_multiselect"
-    )
-    st.session_state['last_selection'] = selection
-
-    col1, col2 = st.sidebar.columns(2)
-    if col1.button("🔄 Load Selected", type="primary", use_container_width=True):
-        # Trigger Indexing for unindexed items (using clean -> disk mapping)
-        for c in selection:
-            # c is the clean name from multiselect
-            if c not in indexed_corpora and c in clean_to_disk:
-                disk_key = clean_to_disk[c] # e.g. "EN-BPPT-tagged"
-                with st.status(f"Indexing '{c}'...", expanded=True) as status:
-                    from pipeline import ingest
-                    parser = ingest.CorpusParser()
-                    f_path = os.path.join(CORPORA_DIR, disk_corpora_map[disk_key])
-                    parser.process_file(f_path, c)
-                    status.update(label=f"Finished indexing {c}!", state="complete", expanded=False)
-        
-        st.session_state['loaded_corpora'] = selection
-        st.cache_data.clear()
-        st.rerun()
-
-    if col2.button("✖️ Deselect All", use_container_width=True):
-        st.session_state['last_selection'] = []
-        st.session_state['loaded_corpora'] = []
-        st.rerun()
-
-    st.sidebar.divider()
-    
     # If nothing loaded, stop here
     if not active_corpora:
-        st.sidebar.info("💡 Select corpora above and click **'Load Selected'** to begin.")
-        if st.sidebar.button("🔍 Diagnose Statistics"):
-             from stats.frequency import get_total_tokens
-             st.sidebar.write(f"Global Tokens: {get_total_tokens()}")
-             st.sidebar.write("Subset Tokens: 0 (No corpora loaded)")
+        st.sidebar.warning("⚠️ No corpora loaded. Use **Corpus Selection** above to load corpora.")
         return {
             'where_clause': "1=0",
             'params': [],
@@ -301,6 +348,7 @@ def render():
             'collocate_filter': [],
             'no_corpora': True
         }
+
     
     st.sidebar.title("METADATA")
     meta_keys = get_metadata_keys(active_corpora)
