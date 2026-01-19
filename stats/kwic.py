@@ -9,7 +9,7 @@ def get_kwic_lines(token, window=7, limit=50, where_clause="1=1", params=(), pos
     # 1. Find IDs of the token matching filters
     if pos_tag:
         matches = safe_execute(conn, f"""
-            SELECT id, file_id 
+            SELECT id, file_id, sentence_id
             FROM tokens 
             WHERE token ILIKE ? AND tag = ? AND {where_clause} 
             ORDER BY id
@@ -17,7 +17,7 @@ def get_kwic_lines(token, window=7, limit=50, where_clause="1=1", params=(), pos
         """, (token, pos_tag, *params, limit)).fetchall()
     else:
         matches = safe_execute(conn, f"""
-            SELECT id, file_id 
+            SELECT id, file_id, sentence_id
             FROM tokens 
             WHERE token ILIKE ? AND {where_clause} 
             ORDER BY id
@@ -26,24 +26,33 @@ def get_kwic_lines(token, window=7, limit=50, where_clause="1=1", params=(), pos
     
     results = []
     
-    for match_id, file_id in matches:
-        # 2. For each match, get window
-        start_id = match_id - window
-        end_id = match_id + window
-        
-        window_tokens = safe_execute(conn, """
-            SELECT token, id, file_id
-            FROM tokens 
-            WHERE id BETWEEN ? AND ? AND file_id = ?
-            ORDER BY id
-        """, (start_id, end_id, file_id)).fetchall()
+    for match_id, file_id, sent_id in matches:
+        # 2. For each match, get window OR full sentence
+        if sent_id and sent_id > 0:
+             # Full Sentence
+             window_tokens = safe_execute(conn, """
+                SELECT token, id
+                FROM tokens 
+                WHERE sentence_id = ? AND file_id = ?
+                ORDER BY id
+            """, (sent_id, file_id)).fetchall()
+        else:
+            # Fixed Window Fallback
+            start_id = match_id - window
+            end_id = match_id + window
+            window_tokens = safe_execute(conn, """
+                SELECT token, id
+                FROM tokens 
+                WHERE id BETWEEN ? AND ? AND file_id = ?
+                ORDER BY id
+            """, (start_id, end_id, file_id)).fetchall()
         
         # Assemble
         left = []
         node = ""
         right = []
         
-        for t, tid, tfid in window_tokens:
+        for t, tid in window_tokens:
             if tid == match_id:
                 node = t
             elif tid < match_id:
@@ -55,6 +64,7 @@ def get_kwic_lines(token, window=7, limit=50, where_clause="1=1", params=(), pos
             'left': " ".join(left),
             'node': node,
             'right': " ".join(right),
+            'full_sentence': True if sent_id and sent_id > 0 else False
         })
         
     if not is_shared:
@@ -81,7 +91,6 @@ def get_phrase_kwic_lines(phrase, window=7, limit=50, where_clause="1=1", params
         if i > 0:
             prev = f"t{i-1}"
             if skip_punct:
-                # Flexible window + negation check
                 joins.append(f"JOIN tokens {alias} ON {alias}.file_id = {prev}.file_id AND {alias}.id > {prev}.id AND {alias}.id <= {prev}.id + 4")
             else:
                 joins.append(f"JOIN tokens {alias} ON {prev}.id + 1 = {alias}.id AND {prev}.file_id = {alias}.file_id")
@@ -106,11 +115,11 @@ def get_phrase_kwic_lines(phrase, window=7, limit=50, where_clause="1=1", params
 
     query = f"""
         WITH start_tokens AS (
-            SELECT id, file_id 
+            SELECT id, file_id, sentence_id 
             FROM tokens 
             WHERE token ILIKE ? AND {where_clause}
         )
-        SELECT t0.id, t0.file_id, t{length-1}.id as final_id
+        SELECT t0.id, t0.file_id, t{length-1}.id as final_id, t0.sentence_id
         FROM start_tokens t0
         {" ".join(joins)}
     """
@@ -127,19 +136,23 @@ def get_phrase_kwic_lines(phrase, window=7, limit=50, where_clause="1=1", params
     matches = safe_execute(conn, query, full_params).fetchall()
     
     results = []
-    for match_id, file_id, final_id in matches:
-        seq_start = match_id
-        seq_end = final_id
-        
-        win_start = seq_start - window
-        win_end = seq_end + window
-        
-        tokens = safe_execute(conn, """
-            SELECT token, id 
-            FROM tokens 
-            WHERE file_id = ? AND id BETWEEN ? AND ? 
-            ORDER BY id
-        """, (file_id, win_start, win_end)).fetchall()
+    for seq_start, file_id, seq_end, sent_id in matches:
+        if sent_id and sent_id > 0:
+            tokens = safe_execute(conn, """
+                SELECT token, id 
+                FROM tokens 
+                WHERE file_id = ? AND sentence_id = ? 
+                ORDER BY id
+            """, (file_id, sent_id)).fetchall()
+        else:
+            win_start = seq_start - window
+            win_end = seq_end + window
+            tokens = safe_execute(conn, """
+                SELECT token, id 
+                FROM tokens 
+                WHERE file_id = ? AND id BETWEEN ? AND ? 
+                ORDER BY id
+            """, (file_id, win_start, win_end)).fetchall()
         
         left, node, right = [], [], []
         for t, tid in tokens:
@@ -153,7 +166,8 @@ def get_phrase_kwic_lines(phrase, window=7, limit=50, where_clause="1=1", params
         results.append({
             'left': " ".join(left),
             'node': " ".join(node),
-            'right': " ".join(right)
+            'right': " ".join(right),
+            'full_sentence': True if sent_id and sent_id > 0 else False
         })
 
     if not is_shared: conn.close()
@@ -168,8 +182,8 @@ def get_collocate_kwic(token, collocate, window=7, limit=5, where_clause="1=1", 
     # Search for pairs - use subquery for t1 to avoid ambiguous columns in where_clause
     if pos_tag:
          query = f"""
-            SELECT t1.id, t1.file_id, t2.id as col_id
-            FROM (SELECT id, file_id, token, tag FROM tokens WHERE {where_clause}) t1
+            SELECT t1.id, t1.file_id, t2.id as col_id, t1.sentence_id
+            FROM (SELECT id, file_id, token, tag, sentence_id FROM tokens WHERE {where_clause}) t1
             JOIN tokens t2 ON t1.file_id = t2.file_id AND t2.id BETWEEN t1.id - ? AND t1.id + ? AND t1.id != t2.id
             WHERE t1.token ILIKE ? AND t1.tag = ? AND t2.token ILIKE ?
             ORDER BY t1.id
@@ -178,8 +192,8 @@ def get_collocate_kwic(token, collocate, window=7, limit=5, where_clause="1=1", 
          matches = safe_execute(conn, query, (*params, window, window, token, pos_tag, collocate, limit)).fetchall()
     else:
         query = f"""
-            SELECT t1.id, t1.file_id, t2.id as col_id
-            FROM (SELECT id, file_id, token FROM tokens WHERE {where_clause}) t1
+            SELECT t1.id, t1.file_id, t2.id as col_id, t1.sentence_id
+            FROM (SELECT id, file_id, token, sentence_id FROM tokens WHERE {where_clause}) t1
             JOIN tokens t2 ON t1.file_id = t2.file_id AND t2.id BETWEEN t1.id - ? AND t1.id + ? AND t1.id != t2.id
             WHERE t1.token ILIKE ? AND t2.token ILIKE ?
             ORDER BY t1.id
@@ -188,15 +202,21 @@ def get_collocate_kwic(token, collocate, window=7, limit=5, where_clause="1=1", 
         matches = safe_execute(conn, query, (*params, window, window, token, collocate, limit)).fetchall()
     
     results = []
-    for match_id, file_id, col_id in matches:
-        start = match_id - window
-        end = match_id + window
-        
-        tokens = safe_execute(conn, """
-            SELECT id, token FROM tokens 
-            WHERE file_id = ? AND id BETWEEN ? AND ?
-            ORDER BY id
-        """, (file_id, start, end)).fetchall()
+    for match_id, file_id, col_id, sent_id in matches:
+        if sent_id and sent_id > 0:
+             tokens = safe_execute(conn, """
+                SELECT id, token FROM tokens 
+                WHERE file_id = ? AND sentence_id = ?
+                ORDER BY id
+            """, (file_id, sent_id)).fetchall()
+        else:
+            start = match_id - window
+            end = match_id + window
+            tokens = safe_execute(conn, """
+                SELECT id, token FROM tokens 
+                WHERE file_id = ? AND id BETWEEN ? AND ?
+                ORDER BY id
+            """, (file_id, start, end)).fetchall()
         
         left = []
         node = ""
@@ -217,7 +237,8 @@ def get_collocate_kwic(token, collocate, window=7, limit=5, where_clause="1=1", 
             'col_id': col_id,
             'match_id': match_id,
             'file_id': file_id,
-            'col_token': collocate
+            'col_token': collocate,
+            'full_sentence': True if sent_id and sent_id > 0 else False
         })
         
     if not is_shared:
@@ -270,18 +291,18 @@ def get_phrase_collocate_kwic(phrase, collocate, window=7, limit=5, where_clause
     # t0.id is start, t{length-1}.id is end.
     query = f"""
         WITH start_tokens AS (
-            SELECT id, file_id 
+            SELECT id, file_id, sentence_id 
             FROM tokens 
             WHERE token ILIKE ? AND {where_clause}
         ),
         matches AS (
-            SELECT t0.id as start_id, t{length-1}.id as final_id, t0.file_id
+            SELECT t0.id as start_id, t{length-1}.id as final_id, t0.file_id, t0.sentence_id
             FROM start_tokens t0
             {" ".join(joins)}
             {"WHERE " + " AND ".join(conditions[1:]) if len(conditions) > 1 else "WHERE 1=1"}
             {gap_checks}
         )
-        SELECT m.start_id, m.final_id, m.file_id, t2.id as col_id
+        SELECT m.start_id, m.final_id, m.file_id, t2.id as col_id, m.sentence_id
         FROM matches m
         JOIN tokens t2 ON m.file_id = t2.file_id 
              AND t2.id BETWEEN m.start_id - ? AND m.final_id + ? 
@@ -295,15 +316,21 @@ def get_phrase_collocate_kwic(phrase, collocate, window=7, limit=5, where_clause
     matches = safe_execute(conn, query, full_params).fetchall()
     
     results = []
-    for seq_start, seq_end, file_id, col_id in matches:
-        win_start = seq_start - window
-        win_end = seq_end + window
-        
-        tokens = safe_execute(conn, """
-            SELECT id, token FROM tokens 
-            WHERE file_id = ? AND id BETWEEN ? AND ?
-            ORDER BY id
-        """, (file_id, win_start, win_end)).fetchall()
+    for seq_start, seq_end, file_id, col_id, sent_id in matches:
+        if sent_id and sent_id > 0:
+             tokens = safe_execute(conn, """
+                SELECT id, token FROM tokens 
+                WHERE file_id = ? AND sentence_id = ?
+                ORDER BY id
+            """, (file_id, sent_id)).fetchall()
+        else:
+            win_start = seq_start - window
+            win_end = seq_end + window
+            tokens = safe_execute(conn, """
+                SELECT id, token FROM tokens 
+                WHERE file_id = ? AND id BETWEEN ? AND ?
+                ORDER BY id
+            """, (file_id, win_start, win_end)).fetchall()
         
         left, node, right = [], [], []
         for tid, t in tokens:
@@ -321,7 +348,8 @@ def get_phrase_collocate_kwic(phrase, collocate, window=7, limit=5, where_clause
             'col_id': col_id,
             'match_id': seq_start,
             'file_id': file_id,
-            'col_token': collocate
+            'col_token': collocate,
+            'full_sentence': True if sent_id and sent_id > 0 else False
         })
         
     if not is_shared: conn.close()

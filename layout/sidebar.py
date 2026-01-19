@@ -217,8 +217,14 @@ def render():
                                 tmp.write(uploaded_file.getvalue())
                             
                             corpus_name_display = os.path.splitext(uploaded_file.name)[0]
-                            parser.process_file(tmp_path, corpus_name_display)
-                            loaded_names.append(corpus_name_display)
+                            try:
+                                parser.process_file(tmp_path, corpus_name_display)
+                                loaded_names.append(corpus_name_display)
+                            except Exception as e:
+                                if "used by another process" in str(e):
+                                    st.error(f"❌ Failed to load {uploaded_file.name}: Database locked by another process.")
+                                else:
+                                    st.error(f"❌ Failed to load {uploaded_file.name}: {e}")
                         finally:
                             if os.path.exists(tmp_path):
                                 os.remove(tmp_path)
@@ -243,8 +249,14 @@ def render():
                         if corpus_clean_name in clean_to_disk:
                             disk_key = clean_to_disk[corpus_clean_name]
                             f_path = os.path.join(CORPORA_DIR, disk_corpora_map[disk_key])
-                            parser.process_file(f_path, corpus_clean_name)
-                            loaded_names.append(corpus_clean_name)
+                            try:
+                                parser.process_file(f_path, corpus_clean_name)
+                                loaded_names.append(corpus_clean_name)
+                            except Exception as e:
+                                if "used by another process" in str(e):
+                                     st.error(f"❌ Failed to load {corpus_clean_name}: Database locked by another process (Try closing other python scripts).")
+                                else:
+                                     st.error(f"❌ Failed to load {corpus_clean_name}: {e}")
             
             # Activate loaded corpora immediately
             if loaded_names:

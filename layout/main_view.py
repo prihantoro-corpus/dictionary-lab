@@ -367,7 +367,8 @@ def render_multiword_view(query, where_clause, params, stop_words, collocate_fil
                             
         with c_tab2:
             st.caption("Collocates positioned by left/right dominance. Distance = Strength.")
-            components.render_collocate_chart(collocs, node_word=query)
+            c_size = st.slider("Chart Size", 0.5, 2.0, 1.0, 0.1, key=f"size_phrase_{query}")
+            components.render_collocate_chart(collocs, node_word=query, chart_size=c_size)
     else:
         st.info("No strong collocates found.")
 
@@ -377,13 +378,16 @@ def render_multiword_view(query, where_clause, params, stop_words, collocate_fil
     kwic_lines = cache.get_phrase_kwic_lines(corpus_hash, query, window=7, limit=10, where_clause=where_clause, params=params, skip_punct=skip_punct)
     
     for line in kwic_lines:
-        st.markdown(f"""
-        <div style="display: flex; justify-content: center; font-family: monospace; font-size: 0.95rem; margin-bottom: 4px;">
-            <span style="text-align: right; width: 45%; margin-right: 10px;">{line['left']}</span>
-            <span style="font-weight: bold; color: #c00;">{line['node']}</span>
-            <span style="text-align: left; width: 45%; margin-left: 10px;">{line['right']}</span>
-        </div>
-        """, unsafe_allow_html=True)
+        if line.get('full_sentence'):
+            components.render_collocate_example(line['left'], line['node'], line['right'])
+        else:
+            st.markdown(f"""
+            <div style="display: flex; justify-content: center; font-family: monospace; font-size: 0.95rem; margin-bottom: 4px;">
+                <span style="text-align: right; width: 45%; margin-right: 10px;">{line['left']}</span>
+                <span style="font-weight: bold; color: #c00;">{line['node']}</span>
+                <span style="text-align: left; width: 45%; margin-left: 10px;">{line['right']}</span>
+            </div>
+            """, unsafe_allow_html=True)
 
     # 10. Collocation Examples
     st.divider()
@@ -783,7 +787,8 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                     
                     with c_tab2:
                         st.caption("Collocates positioned by left/right dominance. Distance = Strength.")
-                        components.render_collocate_chart(collocs_subset, node_word=query)
+                        c_size = st.slider("Chart Size", 0.5, 2.0, 1.0, 0.1, key=f"size_{query}_{tag}")
+                        components.render_collocate_chart(collocs_subset, node_word=query, chart_size=c_size)
                     
                     st.divider()
                     
@@ -810,13 +815,16 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                      st.download_button("📥 Download Examples", csv_kwic, f"examples_{query}_{tag}.csv", "text/csv", key=f"dl_kwic_{query}_{tag}")
                 
                 for line in kwic_lines:
-                     st.markdown(f"""
-                    <div style="display: flex; justify-content: center; font-family: monospace; font-size: 0.95rem; margin-bottom: 4px;">
-                        <span style="text-align: right; width: 45%; margin-right: 10px;">{line['left']}</span>
-                        <span style="font-weight: bold; color: #c00;">{line['node']}</span>
-                        <span style="text-align: left; width: 45%; margin-left: 10px;">{line['right']}</span>
-                    </div>
-                    """, unsafe_allow_html=True)
+                     if line.get('full_sentence'):
+                         components.render_collocate_example(line['left'], line['node'], line['right'])
+                     else:
+                         st.markdown(f"""
+                        <div style="display: flex; justify-content: center; font-family: monospace; font-size: 0.95rem; margin-bottom: 4px;">
+                            <span style="text-align: right; width: 45%; margin-right: 10px;">{line['left']}</span>
+                            <span style="font-weight: bold; color: #c00;">{line['node']}</span>
+                            <span style="text-align: left; width: 45%; margin-left: 10px;">{line['right']}</span>
+                        </div>
+                        """, unsafe_allow_html=True)
                 
                 if st.button("Choose", key=f"btn_choose_kwic_{query}_{tag}", help="Select specific lines"):
                     open_selection_dialog(query, tag, "general", where_clause=where_clause, params=params)

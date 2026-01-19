@@ -113,7 +113,8 @@ def init_db(conn=None):
                 lemma VARCHAR,
                 corpus VARCHAR,
                 metadata JSON,
-                file_id VARCHAR
+                file_id VARCHAR,
+                sentence_id BIGINT
             );
         """)
     except Exception as e:

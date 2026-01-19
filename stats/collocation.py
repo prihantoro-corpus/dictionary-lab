@@ -209,7 +209,7 @@ def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), sto
             WITH node_ids AS (
                 SELECT id, file_id FROM tokens WHERE token ILIKE ? AND tag = ? AND {where_clause}
             )
-            SELECT t2.token, COUNT(*) as O11, 
+            SELECT t2.token, t2.tag, COUNT(*) as O11, 
                    SUM(CASE WHEN t2.id < n.id THEN 1 ELSE 0 END) as left_count, 
                    SUM(CASE WHEN t2.id > n.id THEN 1 ELSE 0 END) as right_count
             FROM node_ids n
@@ -217,7 +217,7 @@ def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), sto
                 AND t2.id BETWEEN n.id - ? AND n.id + ?
                 AND t2.id != n.id
             WHERE {where_clause} {final_filter_sql}
-            GROUP BY t2.token
+            GROUP BY t2.token, t2.tag
             ORDER BY O11 DESC
             LIMIT 200 
         """, (token, pos_tag, *params, window, window, *params, *final_params)).fetchall()
@@ -226,7 +226,7 @@ def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), sto
             WITH node_ids AS (
                 SELECT id, file_id FROM tokens WHERE token ILIKE ? AND {where_clause}
             )
-            SELECT t2.token, COUNT(*) as O11, 
+            SELECT t2.token, t2.tag, COUNT(*) as O11, 
                    SUM(CASE WHEN t2.id < n.id THEN 1 ELSE 0 END) as left_count, 
                    SUM(CASE WHEN t2.id > n.id THEN 1 ELSE 0 END) as right_count
             FROM node_ids n
@@ -234,13 +234,13 @@ def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), sto
                 AND t2.id BETWEEN n.id - ? AND n.id + ?
                 AND t2.id != n.id
             WHERE {where_clause} {final_filter_sql}
-            GROUP BY t2.token
+            GROUP BY t2.token, t2.tag
             ORDER BY O11 DESC
             LIMIT 200 
         """, (token, *params, window, window, *params, *final_params)).fetchall()
     
     results = []
-    for collocate, O11, left_cnt, right_cnt in collocan_counts:
+    for collocate, tag, O11, left_cnt, right_cnt in collocan_counts:
         # Use ILIKE for collocate frequency to match the node's broad matching
         col_freq = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE token ILIKE ? AND {where_clause}", (collocate, *params)).fetchone()[0]
         
@@ -278,6 +278,7 @@ def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), sto
             
             results.append({
                 'collocate': collocate, 
+                'tag': tag,
                 'freq': O11, 
                 'score': LL,
                 'left': left_cnt, 
@@ -496,7 +497,7 @@ def get_phrase_collocates(phrase, window=5, limit=20, where_clause="1=1", params
     
     collocan_counts = safe_execute(conn, f"""
         {cte_base}
-        SELECT t2.token, COUNT(*) as O11,
+        SELECT t2.token, t2.tag, COUNT(*) as O11,
                SUM(CASE WHEN t2.id < m.start_id THEN 1 ELSE 0 END) as left_count, 
                SUM(CASE WHEN t2.id > m.end_id THEN 1 ELSE 0 END) as right_count
         FROM matches m
@@ -504,13 +505,13 @@ def get_phrase_collocates(phrase, window=5, limit=20, where_clause="1=1", params
             AND t2.id BETWEEN m.start_id - ? AND m.end_id + ?
             AND (t2.id < m.start_id OR t2.id > m.end_id)
         WHERE {where_clause} {final_filter_sql}
-        GROUP BY t2.token
+        GROUP BY t2.token, t2.tag
         ORDER BY O11 DESC
         LIMIT 200
     """, (*base_params, window, window, *params, *final_params)).fetchall()
     
     results = []
-    for collocate, O11, left_cnt, right_cnt in collocan_counts:
+    for collocate, tag, O11, left_cnt, right_cnt in collocan_counts:
         col_freq = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE token ILIKE ? AND {where_clause}", (collocate, *params)).fetchone()[0]
         
         try:
@@ -539,6 +540,7 @@ def get_phrase_collocates(phrase, window=5, limit=20, where_clause="1=1", params
             
             results.append({
                 'collocate': collocate, 
+                'tag': tag,
                 'freq': O11, 
                 'score': LL,
                 'left': left_cnt, 

@@ -4,6 +4,15 @@ import pandas as pd
 import json
 from .indexing import get_connection, safe_execute
 
+try:
+    from add_indexes import drop_indexes, add_indexes
+except ImportError:
+    # Fallback if root is not in sys.path
+    import sys
+    import os
+    sys.path.append(os.getcwd())
+    from add_indexes import drop_indexes, add_indexes
+
 class CorpusParser:
     def __init__(self):
         # Regex to capture attributes: key="value" or key='value'
@@ -17,9 +26,11 @@ class CorpusParser:
         
         # Check for metadata tag
         if line.startswith('<') and line.endswith('>'):
-            # It's a tag, extract attributes
+            # It's a tag, extract name and attributes
+            tag_name_match = re.search(r'^<(/?[a-zA-Z0-9]+)', line)
+            tag_name = tag_name_match.group(1).lower() if tag_name_match else ""
             attrs = dict(self.attr_pattern.findall(line))
-            return 'metadata', attrs
+            return 'metadata', (tag_name, attrs)
         else:
             # It's a token line (split by tabs or multiple spaces)
             parts = [p.strip() for p in re.split(r'\t+', line) if p.strip()]
@@ -40,13 +51,16 @@ class CorpusParser:
         self.process_file(filepath, corpus_name)
 
     def process_file(self, filepath, corpus_name):
-        conn, is_shared = get_connection()
+        conn, is_shared = get_connection(allow_fallback=False)
         try:
             # Sanity Check: If file looks like a JSON dictionary, warn
             with open(filepath, 'r', encoding='utf-8', errors='replace') as test_f:
                 head = test_f.read(100).strip()
                 if head.startswith('{') or head.startswith('['):
                     print("WARNING: This file looks like JSON. Are you sure it's a corpus file (vertical text)?")
+
+            # Drop indexes to speed up DELETE and INSERT
+            drop_indexes(conn)
 
             # Idempotency: Remove existing data for this corpus name if it exists
             print(f"Clearing existing data for corpus '{corpus_name}'...")
@@ -60,6 +74,7 @@ class CorpusParser:
                 current_id = 0
 
             current_metadata = {}
+            current_sentence_id = 0
             batch_data = []
             batch_size = 50000
             
@@ -70,7 +85,10 @@ class CorpusParser:
                     type_, data = self.parse_line(line)
                     
                     if type_ == 'metadata':
-                        current_metadata.update(data)
+                        tag_name, attrs = data
+                        if tag_name == 's' or tag_name == 'sentence':
+                             current_sentence_id += 1
+                        current_metadata.update(attrs)
                     elif type_ == 'token':
                         current_id += 1
                         row = {
@@ -80,7 +98,8 @@ class CorpusParser:
                             'lemma': data['lemma'],
                             'corpus': corpus_name,
                             'metadata': json.dumps(current_metadata),
-                            'file_id': filepath
+                            'file_id': filepath,
+                            'sentence_id': current_sentence_id
                         }
                         batch_data.append(row)
                     
@@ -91,6 +110,10 @@ class CorpusParser:
             if batch_data:
                 self._bulk_insert(conn, batch_data)
             
+            # Recreate indexes after ingestion
+            print(f"Recreating indexes for corpus '{corpus_name}'...")
+            add_indexes(conn)
+
             print(f"Finished processing {filepath}. Total tokens: {current_id}")
         except Exception as e:
             print(f"CRITICAL ERROR during ingestion: {e}")
@@ -105,7 +128,7 @@ class CorpusParser:
             df = pd.DataFrame(data)
             # Register the dataframe with a fixed name to avoid scoping issues in safe_execute
             conn.register("batch_df", df)
-            safe_execute(conn, "INSERT INTO tokens (id, token, tag, lemma, corpus, metadata, file_id) SELECT id, token, tag, lemma, corpus, metadata, file_id FROM batch_df")
+            safe_execute(conn, "INSERT INTO tokens (id, token, tag, lemma, corpus, metadata, file_id, sentence_id) SELECT id, token, tag, lemma, corpus, metadata, file_id, sentence_id FROM batch_df")
             conn.unregister("batch_df")
         except Exception as e:
             print(f"Bulk insert failed: {e}")
