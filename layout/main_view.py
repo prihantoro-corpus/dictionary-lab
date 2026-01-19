@@ -216,6 +216,192 @@ def render_entry_tab(where_clause, params):
                 st.session_state.freq_list_page = min(total_pages - 1, page + 1)
                 st.rerun()
 
+def render_multiword_view(query, where_clause, params, stop_words, collocate_filter, skip_punct):
+    """
+    Renders the view for multi-word phrases.
+    """
+    # 1. Corpus Hash
+    corpus_hash = frequency.get_total_tokens(where_clause, params)
+    
+    # 2. Metrics
+    metrics = cache.get_phrase_metrics(corpus_hash, query, where_clause, params, skip_punct=skip_punct)
+    freq = metrics['frequency']
+    
+    if freq == 0:
+        st.error(f"❌ **{query}** was not found in the current filtered database.")
+        st.info("Try searching for the individual words.")
+        parts = query.split()
+        cols = st.columns(len(parts))
+        for i, p in enumerate(parts):
+            cols[i].button(p, key=f"notfound_{p}", on_click=cb_search_token, args=(p,))
+        return
+
+    # 3. Header & Transcription
+    language = st.session_state.get('corpus_language', 'English')
+    st.header(f"{query}")
+    
+    # Transcription (Word by word)
+    parts = query.split()
+    prons = []
+    if language == 'English':
+        for p in parts:
+            try:
+                prons.append(ipa.convert(p))
+            except:
+                prons.append(p)
+        pron_str = " ".join([f"/{p}/" for p in prons])
+        st.markdown(f"<div style='font-size: 20px; color: #555; margin-bottom: 10px;'>{pron_str} (Phrase)</div>", unsafe_allow_html=True)
+    elif language == 'Indonesian':
+         for p in parts:
+            try:
+                prons.append(indo_g2p.convert(p))
+            except:
+                prons.append(p)
+         pron_str = " ".join([f"[{p}]" for p in prons])
+         st.markdown(f"<div style='font-size: 20px; color: #555; margin-bottom: 10px;'>{pron_str}</div>", unsafe_allow_html=True)
+
+    # 4. Stats Bands (PMW & Zipf purely counting)
+    pmw_val = metrics.get('pmw', 0)
+    zipf_val = metrics.get('zipf', 1)
+    
+    # PMW Range
+    pmw_range = cache.get_pmw_range(corpus_hash, where_clause, params)
+    min_pmw = pmw_range['min_pmw']
+    max_pmw = pmw_range['max_pmw']
+    
+    if max_pmw > min_pmw:
+        pmw_pct = ((pmw_val - min_pmw) / (max_pmw - min_pmw)) * 100
+        pmw_pct = min(100, max(1, pmw_pct))
+    else:
+        pmw_pct = 100
+
+    # Render Bands (Reusing HTML logic)
+    pmw_band_parts = [
+        f'<div style="display:inline-flex; flex-direction:column; align-items:flex-start; margin-right:12px; background:#f5f5f5; padding:6px 10px; border-radius:4px;">',
+        f'<span style="font-size:12px; color:#666; margin-bottom:2px;">PMW</span>',
+        f'<div style="display:flex; align-items:center; gap:6px;">',
+        f'<span style="font-weight:bold; font-size:18px; min-width:60px;">{pmw_val:.2f}</span>',
+        f'<div style="background-color:#e0e0e0; width:120px; height:12px; border-radius:6px; overflow:hidden;">',
+        f'<div style="background-color:#2196F3; width:{pmw_pct:.1f}%; height:100%;"></div>',
+        f'</div>',
+        f'<span style="font-size:11px; color:#888;">{pmw_pct:.0f}%</span>',
+        f'</div>',
+        f'</div>'
+    ]
+    pmw_band_html = "".join(pmw_band_parts)
+    
+    zipf_bars = []
+    for i in range(1, 6):
+        color = "#1d2a57" if i <= zipf_val else "#e0e0e0"
+        zipf_bars.append(f"<div style=\"width:10px; height:20px; background-color:{color}; border-radius:2px;\"></div>")
+        
+    zipf_band_parts = [
+        f'<div title="Zipf Scale" style="display:inline-flex; flex-direction:column; align-items:center; background:#f5f5f5; padding:6px 10px; border-radius:4px;">',
+        f'<span style="font-size:12px; color:#666; margin-bottom:4px;">Zipf {zipf_val}</span>',
+        f'<div style="display:flex; gap:3px;">',
+        " ".join(zipf_bars),
+        f'</div>',
+        f'</div>'
+    ]
+    zipf_band_html = "".join(zipf_band_parts)
+
+    st.markdown(f'<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;"><span style="font-size: 24px;">Freq: <strong>{freq}</strong></span>{pmw_band_html}{zipf_band_html}</div>', unsafe_allow_html=True)
+    
+    # 5. External Links
+    if language == 'English':
+        ph_collins = query.replace(" ", "-")
+        st.markdown(f"<div style=\"font-size:12px; margin-top:5px;\"><a href=\"https://www.collinsdictionary.com/dictionary/english/{ph_collins}\" target=\"_blank\">Collins Dictionary</a> • <a href=\"https://www.collinsdictionary.com/dictionary/english-thesaurus/{ph_collins}\" target=\"_blank\">Thesaurus</a></div>", unsafe_allow_html=True)
+    elif language == 'Indonesian':
+        ph_kbbi = query.replace(" ", "%20")
+        st.markdown(f"<div style=\"font-size:12px; margin-top:5px;\"><a href=\"https://kbbi.kemendikdasmen.go.id/entri/{ph_kbbi}\" target=\"_blank\">KBBI (Kemendikbud)</a> • <a href=\"https://tesaurus.kemendikdasmen.go.id/tematis/lema/{ph_kbbi}\" target=\"_blank\">Tesaurus</a></div>", unsafe_allow_html=True)
+
+    st.divider()
+
+    # 6. Constituent Words
+    st.subheader("Constituent Words")
+    c_cols = st.columns(len(parts))
+    for i, p in enumerate(parts):
+        c_cols[i].button(p, key=f"const_{p}_{i}", use_container_width=True, on_click=cb_search_token, args=(p,))
+        
+    st.divider()
+
+    # 7. N-Grams
+    st.subheader("N-Grams")
+    st.caption(f"Showing {len(parts)+1}-grams")
+    ngrams = cache.get_phrase_ngrams(corpus_hash, query, limit=5, where_clause=where_clause, params=params, stop_words=stop_words, skip_punct=skip_punct)
+    
+    c_fwd, c_bwd = st.columns(2)
+    with c_fwd:
+        st.caption("Phrase + Word")
+        if ngrams.get('forward'):
+             st.table(pd.DataFrame(ngrams['forward'], columns=['N-Gram', 'Freq']))
+        else:
+             st.caption("-")
+             
+    with c_bwd:
+        st.caption("Word + Phrase")
+        if ngrams.get('backward'):
+             st.table(pd.DataFrame(ngrams['backward'], columns=['N-Gram', 'Freq']))
+        else:
+             st.caption("-")
+
+    # 8. Collocates (Graph/List)
+    st.divider()
+    st.subheader("Top-20 Collocates")
+    collocs = cache.get_phrase_collocates(corpus_hash, query, limit=20, where_clause=where_clause, params=params, stop_words=stop_words, allowed_words=collocate_filter, skip_punct=skip_punct)
+    
+    if collocs:
+        c_tab1, c_tab2 = st.tabs(["📋 List View", "🕸️ Network Graph"])
+        with c_tab1:
+            chunk_size = 5
+            chunks = [collocs[i:i + chunk_size] for i in range(0, len(collocs), chunk_size)]
+            cols_grid = st.columns(4)
+            for col_idx, chunk in enumerate(chunks):
+                if col_idx < 4:
+                    with cols_grid[col_idx]:
+                        for item in chunk:
+                            col_txt = item['collocate']
+                            score_val = item.get('score', 0)
+                            freq_val = item.get('freq', 0)
+                            st.button(f"{col_txt} ({score_val:.1f})", key=f"p_coll_{col_txt}", help=f"Freq: {freq_val}", use_container_width=True, on_click=cb_search_token, args=(col_txt,))
+                            
+        with c_tab2:
+            st.caption("Collocates positioned by left/right dominance. Distance = Strength.")
+            components.render_collocate_chart(collocs, node_word=query)
+    else:
+        st.info("No strong collocates found.")
+
+    # 9. Examples (KWIC)
+    st.divider()
+    st.subheader("Examples")
+    kwic_lines = cache.get_phrase_kwic_lines(corpus_hash, query, window=7, limit=10, where_clause=where_clause, params=params, skip_punct=skip_punct)
+    
+    for line in kwic_lines:
+        st.markdown(f"""
+        <div style="display: flex; justify-content: center; font-family: monospace; font-size: 0.95rem; margin-bottom: 4px;">
+            <span style="text-align: right; width: 45%; margin-right: 10px;">{line['left']}</span>
+            <span style="font-weight: bold; color: #c00;">{line['node']}</span>
+            <span style="text-align: left; width: 45%; margin-left: 10px;">{line['right']}</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # 10. Collocation Examples
+    st.divider()
+    st.subheader("Examples by Collocates")
+    top_collocs = [c['collocate'] for c in collocs[:3]]
+    if top_collocs:
+        for col_word in top_collocs:
+            with st.expander(f"Usage with '{col_word}'", expanded=False):
+                col_examples = cache.get_phrase_collocate_kwic(corpus_hash, query, col_word, where_clause=where_clause, params=params, limit=3, skip_punct=skip_punct)
+                if col_examples:
+                    for ex in col_examples:
+                        components.render_collocate_example(ex['left'], ex['node'], ex['right'], ex['col_token'])
+                else:
+                    st.caption("No examples found matching this collocate.")
+    else:
+        st.caption("No strong word partners found.")
+
+
 def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_punct):
     # Search input - the widget automatically syncs with st.session_state.search_box
     st.text_input(
@@ -228,6 +414,11 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
     query = st.session_state.search_box.strip()
     
     if query:
+        # Multi-word Check
+        if " " in query:
+             render_multiword_view(query, where_clause, params, stop_words, collocate_filter, skip_punct)
+             return
+
         # Autocomplete (Respecting filters) - Show suggestions for quick picking
         suggestions = search.autocomplete(query, where_clause, params)
         if suggestions and query not in suggestions:

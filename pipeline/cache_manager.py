@@ -22,7 +22,7 @@ def get_ngrams(corpus_hash, token, limit=10, where_clause="1=1", params=(), stop
     return collocation.get_ngrams(token, limit, where_clause, params, stop_words, skip_punct, pos_tag)
 
 @st.cache_data(persist="disk", show_spinner=False)
-def get_collocates(corpus_hash, token, window=5, limit=20, where_clause="1=1", params=(), stop_words=None, allowed_words=None, skip_punct=True, pos_tag=None, v=2):
+def get_collocates(corpus_hash, token, window=5, limit=20, where_clause="1=1", params=(), stop_words=None, allowed_words=None, skip_punct=True, pos_tag=None, v=3):
     return collocation.get_collocates(token, window, limit, where_clause, params, stop_words, allowed_words, skip_punct, pos_tag)
 
 @st.cache_data(persist="disk", show_spinner=False)
@@ -32,3 +32,22 @@ def get_kwic_lines(corpus_hash, token, window=7, limit=50, where_clause="1=1", p
 @st.cache_data(persist="disk", show_spinner=False)
 def get_collocate_kwic(corpus_hash, token, collocate, window=7, limit=5, where_clause="1=1", params=(), pos_tag=None):
     return kwic.get_collocate_kwic(token, collocate, window, limit, where_clause, params, pos_tag)
+
+@st.cache_data(persist="disk", show_spinner=False)
+def get_phrase_metrics(corpus_hash, phrase, where_clause="1=1", params=(), skip_punct=True):
+    return frequency.get_phrase_metrics(phrase, where_clause=where_clause, params=params, skip_punct=skip_punct)
+
+@st.cache_data(persist="disk", show_spinner=False)
+def get_phrase_ngrams(corpus_hash, phrase, limit=10, where_clause="1=1", params=(), stop_words=None, skip_punct=True):
+    return collocation.get_phrase_ngrams(phrase, limit, where_clause, params, stop_words, skip_punct)
+
+@st.cache_data(persist="disk", show_spinner=False)
+def get_phrase_collocates(corpus_hash, phrase, window=5, limit=20, where_clause="1=1", params=(), stop_words=None, allowed_words=None, skip_punct=True):
+    return collocation.get_phrase_collocates(phrase, window, limit, where_clause, params, stop_words, allowed_words, skip_punct)
+
+@st.cache_data(persist="disk", show_spinner=False)
+def get_phrase_kwic_lines(corpus_hash, phrase, window=7, limit=50, where_clause="1=1", params=(), skip_punct=True):
+    return kwic.get_phrase_kwic_lines(phrase, window, limit, where_clause, params, skip_punct=skip_punct)
+@st.cache_data(persist="disk", show_spinner=False)
+def get_phrase_collocate_kwic(corpus_hash, phrase, collocate, window=7, limit=5, where_clause="1=1", params=(), skip_punct=True):
+    return kwic.get_phrase_collocate_kwic(phrase, collocate, window, limit, where_clause, params, skip_punct=skip_punct)
