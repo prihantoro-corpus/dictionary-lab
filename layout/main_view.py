@@ -220,6 +220,10 @@ def render_multiword_view(query, where_clause, params, stop_words, collocate_fil
     """
     Renders the view for multi-word phrases.
     """
+    parallel_tgt = None
+    if st.session_state.get('is_parallel') and st.session_state.get('parallel_pair'):
+        parallel_tgt = st.session_state['parallel_pair'][1]
+
     # 1. Corpus Hash
     corpus_hash = frequency.get_total_tokens(where_clause, params)
     
@@ -376,10 +380,12 @@ def render_multiword_view(query, where_clause, params, stop_words, collocate_fil
     st.divider()
     st.subheader("Examples")
     kwic_lines = cache.get_phrase_kwic_lines(corpus_hash, query, window=7, limit=10, where_clause=where_clause, params=params, skip_punct=skip_punct)
+    if parallel_tgt:
+        kwic_lines = cache.get_parallel_extra(corpus_hash, kwic_lines, parallel_tgt)
     
     for line in kwic_lines:
-        if line.get('full_sentence'):
-            components.render_collocate_example(line['left'], line['node'], line['right'])
+        if line.get('full_sentence') or parallel_tgt:
+            components.render_collocate_example(line['left'], line['node'], line['right'], translation=line.get('translation'))
         else:
             st.markdown(f"""
             <div style="display: flex; justify-content: center; font-family: monospace; font-size: 0.95rem; margin-bottom: 4px;">
@@ -397,9 +403,11 @@ def render_multiword_view(query, where_clause, params, stop_words, collocate_fil
         for col_word in top_collocs:
             with st.expander(f"Usage with '{col_word}'", expanded=False):
                 col_examples = cache.get_phrase_collocate_kwic(corpus_hash, query, col_word, where_clause=where_clause, params=params, limit=3, skip_punct=skip_punct)
+                if parallel_tgt:
+                    col_examples = cache.get_parallel_extra(corpus_hash, col_examples, parallel_tgt)
                 if col_examples:
                     for ex in col_examples:
-                        components.render_collocate_example(ex['left'], ex['node'], ex['right'], ex['col_token'])
+                        components.render_collocate_example(ex['left'], ex['node'], ex['right'], ex['col_token'], translation=ex.get('translation'))
                 else:
                     st.caption("No examples found matching this collocate.")
     else:
@@ -418,6 +426,10 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
     query = st.session_state.search_box.strip()
     
     if query:
+        parallel_tgt = None
+        if st.session_state.get('is_parallel') and st.session_state.get('parallel_pair'):
+            parallel_tgt = st.session_state['parallel_pair'][1]
+
         # Multi-word Check
         if " " in query:
              render_multiword_view(query, where_clause, params, stop_words, collocate_filter, skip_punct)
@@ -808,6 +820,8 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                     kwic_lines = [{'left': r[0], 'node': r[1], 'right': r[2]} for r in ex_over if len(r) >= 3]
                 else:
                     kwic_lines = cache.get_kwic_lines(corpus_hash, query, where_clause=where_clause, params=params, limit=10, pos_tag=tag)
+                    if parallel_tgt:
+                        kwic_lines = cache.get_parallel_extra(corpus_hash, kwic_lines, parallel_tgt)
                 
                 if kwic_lines:
                      df_kwic = pd.DataFrame(kwic_lines)
@@ -815,8 +829,8 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                      st.download_button("📥 Download Examples", csv_kwic, f"examples_{query}_{tag}.csv", "text/csv", key=f"dl_kwic_{query}_{tag}")
                 
                 for line in kwic_lines:
-                     if line.get('full_sentence'):
-                         components.render_collocate_example(line['left'], line['node'], line['right'])
+                     if line.get('full_sentence') or parallel_tgt:
+                         components.render_collocate_example(line['left'], line['node'], line['right'], translation=line.get('translation'))
                      else:
                          st.markdown(f"""
                         <div style="display: flex; justify-content: center; font-family: monospace; font-size: 0.95rem; margin-bottom: 4px;">
@@ -859,9 +873,11 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                          for col_word in top_collocs:
                             with st.expander(f"Usage with '{col_word}'", expanded=False):
                                 col_examples = cache.get_collocate_kwic(corpus_hash, query, col_word, where_clause=where_clause, params=params, limit=3, pos_tag=tag)
+                                if parallel_tgt:
+                                    col_examples = cache.get_parallel_extra(corpus_hash, col_examples, parallel_tgt)
                                 if col_examples:
                                     for ex in col_examples:
-                                         components.render_collocate_example(ex['left'], ex['node'], ex['right'], ex['col_token'])
+                                         components.render_collocate_example(ex['left'], ex['node'], ex['right'], ex['col_token'], translation=ex.get('translation'))
                                 
                                 if st.button("Choose", key=f"btn_choose_coll_{query}_{tag}_{col_word}"):
                                     open_selection_dialog(query, tag, "collocate", collocate_word=col_word, where_clause=where_clause, params=params)

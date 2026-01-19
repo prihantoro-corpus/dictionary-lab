@@ -34,6 +34,12 @@ def get_disk_corpora():
             disk_files[name] = f
     return disk_files
 
+def clean_name(n):
+    """Helper to map common filenames to cleaner names."""
+    if "EN-BPPT" in n: return "EN-BPPT"
+    if "KOSLAT" in n: return "KOSLAT"
+    return n
+
 @st.cache_data
 def get_metadata_keys(corpora=None):
     """Returns list of unique keys found in metadata JSON, optionally filtered by corpora."""
@@ -93,36 +99,20 @@ def get_metadata_values(key, corpora=None):
 def render():
     st.sidebar.title("DICTIONARY EDITOR")
     
-    # --- Language Selection Section (FIRST) ---
-    with st.sidebar.expander("🌐 Language Selection", expanded=True):
-        st.caption("Select the language of your corpus:")
-        
-        # Initialize language in session state
-        if 'corpus_language' not in st.session_state:
-            st.session_state['corpus_language'] = 'English'
-        
-        language = st.selectbox(
-            "Corpus Language:",
-            options=['English', 'Indonesian', 'Other'],
-            index=['English', 'Indonesian', 'Other'].index(st.session_state['corpus_language']),
-            key="language_selector",
-            help="This determines which features are available. English: all features. Indonesian: IPA transcription + Indonesian dictionaries. Other: basic features only."
-        )
-        
-        st.session_state['corpus_language'] = language
-        
-        # Show language-specific info
-        if language == 'English':
-            st.success("✅ All features active")
-        elif language == 'Indonesian':
-            st.info("🇮🇩 Indonesian IPA + dictionaries active")
-        else:
-            st.warning("⚠️ Limited features (no transcription/badges)")
-    
-    st.sidebar.divider()
+    # Initialize session state
+    if 'is_parallel' not in st.session_state:
+        st.session_state['is_parallel'] = False
+    if 'corpus_language' not in st.session_state:
+        st.session_state['corpus_language'] = 'English'
+    if 'target_language' not in st.session_state:
+        st.session_state['target_language'] = 'Indonesian'
     
     # --- Corpus Selection Section ---
     with st.sidebar.expander("📁 Corpus Selection", expanded=True):
+        # 1. Choose Parallel vs Monolingual
+        is_parallel = st.toggle("Parallel Corpus Mode", value=st.session_state['is_parallel'])
+        st.session_state['is_parallel'] = is_parallel
+
         # Initialize session state for corpus selection
         if 'corpus_selection_mode' not in st.session_state:
             st.session_state['corpus_selection_mode'] = None
@@ -130,7 +120,7 @@ def render():
             st.session_state['staged_files'] = []
         if 'staged_builtin' not in st.session_state:
             st.session_state['staged_builtin'] = []
-        
+
         # Step 1: Show initial selection buttons or the selected mode interface
         if st.session_state['corpus_selection_mode'] is None:
             st.caption("Choose how to add corpora:")
@@ -143,69 +133,87 @@ def render():
             if col2.button("📚 Built-in Corpora", use_container_width=True):
                 st.session_state['corpus_selection_mode'] = "Built-in Corpora"
                 st.rerun()
-        
-        # Step 2: Show appropriate interface based on mode
-        elif st.session_state['corpus_selection_mode'] == "File Upload":
-            st.caption("📤 Upload one or more corpus files:")
-            uploaded_files = st.file_uploader(
-                "Select files",
-                type=None,
-                accept_multiple_files=True,
-                key="corpus_file_uploader"
-            )
-            
-            if uploaded_files:
-                st.session_state['staged_files'] = uploaded_files
-                st.info(f"📋 **{len(uploaded_files)} file(s) selected:**")
-                for f in uploaded_files:
-                    st.write(f"  • {f.name}")
-            else:
-                st.session_state['staged_files'] = []
-                st.caption("No files selected yet.")
-        
-        elif st.session_state['corpus_selection_mode'] == "Built-in Corpora":
-            st.caption("📚 Select from available built-in corpora:")
-            disk_corpora_map = get_disk_corpora()
-            
-            # Helper to map common filenames to cleaner names
-            def clean_name(n):
-                if "EN-BPPT" in n: return "EN-BPPT"
-                if "KOSLAT" in n: return "KOSLAT"
-                return n
-            
-            # Get all available corpora (clean names)
-            available_corpora = sorted([clean_name(c) for c in disk_corpora_map.keys()])
-            
-            if not available_corpora:
-                st.warning("No built-in corpora found in the corpora/ folder.")
-            else:
-                selected_builtin = st.multiselect(
-                    "Choose corpora:",
-                    options=available_corpora,
-                    default=st.session_state.get('staged_builtin', []),
-                    key="builtin_corpus_multiselect"
+
+        if not is_parallel:
+            if st.session_state['corpus_selection_mode'] is not None:
+                st.caption("Select Source Language:")
+                st.session_state['corpus_language'] = st.selectbox(
+                    "Source Language", 
+                    ['English', 'Indonesian', 'Other'], 
+                    index=['English', 'Indonesian', 'Other'].index(st.session_state['corpus_language']),
+                    key="mono_lang"
                 )
-                st.session_state['staged_builtin'] = selected_builtin
-                
-                if selected_builtin:
-                    st.info(f"📋 **{len(selected_builtin)} corpus/corpora selected:**")
-                    for c in selected_builtin:
-                        st.write(f"  • {c}")
+
+            # Step 2: Show appropriate interface based on mode
+            elif st.session_state['corpus_selection_mode'] == "File Upload":
+                st.caption("📤 Upload one or more corpus files:")
+                uploaded_files = st.file_uploader("Select files", type=None, accept_multiple_files=True, key="mono_upload")
+                if uploaded_files:
+                    st.session_state['staged_files'] = uploaded_files
+                    st.info(f"📋 **{len(uploaded_files)} file(s) selected**")
                 else:
-                    st.caption("No corpora selected yet.")
+                    st.session_state['staged_files'] = []
+
+            elif st.session_state['corpus_selection_mode'] == "Built-in Corpora":
+                st.caption("📚 Select from available built-in corpora:")
+                disk_corpora_map = get_disk_corpora()
+                available_corpora = sorted([clean_name(c) for c in disk_corpora_map.keys()])
+                if not available_corpora:
+                    st.warning("No built-in corpora found.")
+                else:
+                    selected_builtin = st.multiselect("Choose corpora:", options=available_corpora, key="mono_builtin")
+                    st.session_state['staged_builtin'] = selected_builtin
+        
+        elif st.session_state['corpus_selection_mode'] is not None:
+            # --- Parallel Mode UI ---
+            st.info("🔗 **Parallel Mode Active**")
+            
+            disk_corpora_map = get_disk_corpora()
+            available_corpora = sorted([clean_name(c) for c in disk_corpora_map.keys()])
+
+            if st.session_state['corpus_selection_mode'] == "Built-in Corpora" and not available_corpora:
+                st.warning("No built-in corpora found on disk.")
+                st.session_state['staged_parallel'] = None
+            else:
+                # Box 1: Source
+                with st.container(border=True):
+                    st.markdown("**1. Source Corpus**")
+                    src_lang = st.selectbox("Source Language", ['English', 'Indonesian', 'Other'], index=0, key="p_src_lang")
+                    st.session_state['corpus_language'] = src_lang
+                    
+                    if st.session_state['corpus_selection_mode'] == "File Upload":
+                        src_selection = st.file_uploader("Upload Source File", type=['xml', 'txt'], key="ups_src")
+                    else:
+                        src_selection = st.selectbox("Select Source Corpus", options=available_corpora, key="para_src_builtin")
+            
+                # Box 2: Target
+                with st.container(border=True):
+                    st.markdown("**2. Target Corpus**")
+                    tgt_lang = st.selectbox("Target Language", ['English', 'Indonesian', 'Other'], index=1, key="p_tgt_lang")
+                    st.session_state['target_language'] = tgt_lang
+                    
+                    if st.session_state['corpus_selection_mode'] == "File Upload":
+                        tgt_selection = st.file_uploader("Upload Target File", type=['xml', 'txt'], key="ups_tgt")
+                    else:
+                        tgt_selection = st.selectbox("Select Target Corpus", options=available_corpora, key="para_tgt_builtin")
+                
+                st.session_state['staged_parallel'] = (src_selection, tgt_selection) if src_selection and tgt_selection else None
         
         # Step 3: Load Corpus button
         st.divider()
-        has_staged_content = (
-            (st.session_state['corpus_selection_mode'] == "File Upload" and st.session_state['staged_files']) or
-            (st.session_state['corpus_selection_mode'] == "Built-in Corpora" and st.session_state['staged_builtin'])
-        )
+        if not is_parallel:
+            has_staged_content = (
+                (st.session_state['corpus_selection_mode'] == "File Upload" and st.session_state['staged_files']) or
+                (st.session_state['corpus_selection_mode'] == "Built-in Corpora" and st.session_state['staged_builtin'])
+            )
+        else:
+            has_staged_content = st.session_state.get('staged_parallel') is not None
         
         if st.button("🚀 Load Corpus", type="primary", use_container_width=True, disabled=not has_staged_content):
             loaded_names = []
             
-            # Process file uploads
-            if st.session_state['corpus_selection_mode'] == "File Upload" and st.session_state['staged_files']:
+            # 1. Process Monolingual Uploads
+            if not is_parallel and st.session_state['corpus_selection_mode'] == "File Upload" and st.session_state['staged_files']:
                 from pipeline import ingest
                 parser = ingest.CorpusParser()
                 
@@ -229,17 +237,58 @@ def render():
                             if os.path.exists(tmp_path):
                                 os.remove(tmp_path)
             
+            # 2. Process Parallel Uploads
+            elif is_parallel and st.session_state.get('staged_parallel'):
+                src_selection, tgt_selection = st.session_state['staged_parallel']
+                from pipeline import ingest
+                parser = ingest.CorpusParser()
+                disk_corpora_map = get_disk_corpora()
+                clean_to_disk = {clean_name(k): k for k in disk_corpora_map.keys()}
+                
+                def load_parallel_unit(selection, label):
+                   if isinstance(selection, str):
+                       # Built-in logic
+                       if selection in clean_to_disk:
+                           disk_key = clean_to_disk[selection]
+                           f_path = os.path.join(CORPORA_DIR, disk_corpora_map[disk_key])
+                           parser.process_file(f_path, selection)
+                           return selection
+                       return None
+                   else:
+                       # Upload logic
+                       tmp_fd, tmp_path = tempfile.mkstemp()
+                       try:
+                           with os.fdopen(tmp_fd, 'wb') as tmp:
+                               tmp.write(selection.getvalue())
+                           name = os.path.splitext(selection.name)[0]
+                           parser.process_file(tmp_path, name)
+                           return name
+                       finally:
+                           if os.path.exists(tmp_path): os.remove(tmp_path)
+
+                with st.spinner("Processing Source..."):
+                    src_name = load_parallel_unit(src_selection, "SRC")
+                with st.spinner("Processing Target..."):
+                    tgt_name = load_parallel_unit(tgt_selection, "TGT")
+                
+                loaded_names = [src_name, tgt_name]
+                st.session_state['parallel_pair'] = (src_name, tgt_name)
+                
+                # Alignment Check (Simple sentence count check)
+                conn, _ = get_connection()
+                src_count = conn.execute("SELECT COUNT(DISTINCT sentence_id) FROM tokens WHERE corpus=?", (src_name,)).fetchone()[0]
+                tgt_count = conn.execute("SELECT COUNT(DISTINCT sentence_id) FROM tokens WHERE corpus=?", (tgt_name,)).fetchone()[0]
+                
+                if src_count != tgt_count:
+                    st.warning(f"⚠️ **Alignment Warning**: Source has {src_count} sentences, Target has {tgt_count}. Results may mismatch.")
+                else:
+                    st.success(f"✅ Parallel Corpora perfectly aligned ({src_count} sentences).")
+            
             # Process built-in corpora
             elif st.session_state['corpus_selection_mode'] == "Built-in Corpora" and st.session_state['staged_builtin']:
                 from pipeline import ingest
                 parser = ingest.CorpusParser()
                 disk_corpora_map = get_disk_corpora()
-                
-                # Helper to map common filenames to cleaner names
-                def clean_name(n):
-                    if "EN-BPPT" in n: return "EN-BPPT"
-                    if "KOSLAT" in n: return "KOSLAT"
-                    return n
                 
                 # Create reverse mapping: clean_name -> disk_key
                 clean_to_disk = {clean_name(k): k for k in disk_corpora_map.keys()}
@@ -328,7 +377,6 @@ def render():
         
         st.sidebar.divider()
         if st.sidebar.button("🗑️ Clear All Corpus Data", help="Delete all tokens from the database."):
-            from pipeline.indexing import get_connection
             conn, is_shared = get_connection()
             try:
                 conn.execute("DELETE FROM tokens")
@@ -349,6 +397,12 @@ def render():
         st.session_state['loaded_corpora'] = []
     
     active_corpora = st.session_state['loaded_corpora']
+    
+    # In parallel mode, we only search the Source corpus
+    if st.session_state.get('is_parallel') and st.session_state.get('parallel_pair'):
+        src_name = st.session_state['parallel_pair'][0]
+        if src_name in active_corpora:
+            active_corpora = [src_name]
     
     # If nothing loaded, stop here
     if not active_corpora:

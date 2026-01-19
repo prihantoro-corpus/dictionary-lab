@@ -114,7 +114,9 @@ def init_db(conn=None):
                 corpus VARCHAR,
                 metadata JSON,
                 file_id VARCHAR,
-                sentence_id BIGINT
+                sentence_id BIGINT,
+                doc_id BIGINT,
+                sentence_num BIGINT
             );
         """)
     except Exception as e:

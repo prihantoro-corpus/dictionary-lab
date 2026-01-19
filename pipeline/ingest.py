@@ -75,6 +75,8 @@ class CorpusParser:
 
             current_metadata = {}
             current_sentence_id = 0
+            current_doc_id = 0
+            current_sentence_num = 0
             batch_data = []
             batch_size = 50000
             
@@ -88,6 +90,9 @@ class CorpusParser:
                         tag_name, attrs = data
                         if tag_name == 's' or tag_name == 'sentence':
                              current_sentence_id += 1
+                             current_sentence_num = int(attrs.get('n', 0))
+                        elif tag_name.startswith('doc'):
+                             current_doc_id += 1
                         current_metadata.update(attrs)
                     elif type_ == 'token':
                         current_id += 1
@@ -99,7 +104,9 @@ class CorpusParser:
                             'corpus': corpus_name,
                             'metadata': json.dumps(current_metadata),
                             'file_id': filepath,
-                            'sentence_id': current_sentence_id
+                            'sentence_id': current_sentence_id,
+                            'doc_id': current_doc_id,
+                            'sentence_num': current_sentence_num
                         }
                         batch_data.append(row)
                     
@@ -128,7 +135,7 @@ class CorpusParser:
             df = pd.DataFrame(data)
             # Register the dataframe with a fixed name to avoid scoping issues in safe_execute
             conn.register("batch_df", df)
-            safe_execute(conn, "INSERT INTO tokens (id, token, tag, lemma, corpus, metadata, file_id, sentence_id) SELECT id, token, tag, lemma, corpus, metadata, file_id, sentence_id FROM batch_df")
+            safe_execute(conn, "INSERT INTO tokens (id, token, tag, lemma, corpus, metadata, file_id, sentence_id, doc_id, sentence_num) SELECT id, token, tag, lemma, corpus, metadata, file_id, sentence_id, doc_id, sentence_num FROM batch_df")
             conn.unregister("batch_df")
         except Exception as e:
             print(f"Bulk insert failed: {e}")

@@ -51,3 +51,6 @@ def get_phrase_kwic_lines(corpus_hash, phrase, window=7, limit=50, where_clause=
 @st.cache_data(persist="disk", show_spinner=False)
 def get_phrase_collocate_kwic(corpus_hash, phrase, collocate, window=7, limit=5, where_clause="1=1", params=(), skip_punct=True):
     return kwic.get_phrase_collocate_kwic(phrase, collocate, window, limit, where_clause, params, skip_punct=skip_punct)
+
+def get_parallel_extra(corpus_hash, src_results, tgt_corpus):
+    return kwic.get_parallel_extra(src_results, tgt_corpus)

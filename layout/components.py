@@ -30,10 +30,11 @@ def render_badge(text, type="corpus"):
     color = "blue" if type == "corpus" else "green"
     st.markdown(f":{color}[{text}]")
 
-def render_collocate_example(left, node, right, col_token=None):
+def render_collocate_example(left, node, right, col_token=None, translation=None):
     """
     Renders a sentence with search word and optionally collocate highlighted.
     Handles both lists and strings for left/right context.
+    If translation is provided, it's rendered below with a distinct style.
     """
     def highlight_node(text):
         if not text: return text
@@ -60,7 +61,14 @@ def render_collocate_example(left, node, right, col_token=None):
     r_str = highlight_node(get_str(right))
     n_str = highlight_node(node)
     
-    st.markdown(f"<div style='margin-bottom: 8px; line-height: 1.4; border-left: 3px solid #eee; padding-left: 10px;'>{l_str} {n_str} {r_str}</div>", unsafe_allow_html=True)
+    full_html = f"{l_str} {n_str} {r_str}"
+    
+    st.markdown(f"""
+    <div style="border-left: 3px solid #ff4b4b; padding-left: 10px; margin-bottom: 15px;">
+        <div style="font-size: 1.05em; line-height: 1.4;">{full_html}</div>
+        {f'<div style="margin-top: 5px; color: #4e9a06; font-style: italic; font-size: 0.95em;">{translation}</div>' if translation else ''}
+    </div>
+    """, unsafe_allow_html=True)
 
 import matplotlib.pyplot as plt
 

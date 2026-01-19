@@ -1,0 +1,22 @@
+<doc id="test">
+<s>
+The	DT	the
+quick	JJ	quick
+brown	JJ	brown
+fox	NN	fox
+jumps	VBZ	jump
+over	IN	over
+the	DT	the
+lazy	JJ	lazy
+dog	NN	dog
+.	.	.
+</s>
+<s>
+A	DT	a
+second	JJ	second
+sentence	NN	sentence
+appears	VBZ	appear
+here	RB	here
+.	.	.
+</s>
+</doc>
