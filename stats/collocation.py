@@ -1,5 +1,6 @@
 from pipeline.indexing import get_connection, safe_execute
 import math
+import os
 
 def parse_collocate_filter(filter_list, alias="t2"):
     """
@@ -171,6 +172,17 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, 
         conn.close()
     return results
 
+def _get_ll_sql(o11, e11, o12, e12, o21, e21, o22, e22):
+    """Returns the SQL fragment for calculating Log-Likelihood."""
+    return f"""
+        2 * (
+            (CASE WHEN {o11} > 0 AND {e11} > 0 THEN {o11} * LN({o11}/{e11}) ELSE 0 END) +
+            (CASE WHEN {o12} > 0 AND {e12} > 0 THEN {o12} * LN({o12}/{e12}) ELSE 0 END) +
+            (CASE WHEN {o21} > 0 AND {e21} > 0 THEN {o21} * LN({o21}/{e21}) ELSE 0 END) +
+            (CASE WHEN {o22} > 0 AND {e22} > 0 THEN {o22} * LN({o22}/{e22}) ELSE 0 END)
+        )
+    """
+
 def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), stop_words=None, allowed_words=None, skip_punct=True, pos_tag=None):
     conn, is_shared = get_connection()
     if stop_words is None: stop_words = []
@@ -179,15 +191,14 @@ def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), sto
     
     base_filter_sql = ""
     base_filter_params = []
-    
     if stop_words:
         placeholders = ",".join(["?"] * len(stop_words))
         base_filter_sql += f" AND t2.token NOT IN ({placeholders})"
         base_filter_params.extend(stop_words)
-
     if skip_punct:
          base_filter_sql += " AND regexp_matches(t2.token, '[a-zA-Z0-9]')"
 
+    # 1. Get Node Freq and Total N
     N = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE {where_clause}", params).fetchone()[0]
     if N == 0:
         if not is_shared: conn.close()
@@ -195,103 +206,84 @@ def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), sto
     
     if pos_tag:
         node_freq = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE token ILIKE ? AND tag = ? AND {where_clause}", (token, pos_tag, *params)).fetchone()[0]
+        node_ids_cte = f"SELECT id, file_id FROM tokens WHERE token ILIKE ? AND tag = ? AND {where_clause}"
+        node_params = (token, pos_tag, *params)
     else:
         node_freq = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE token ILIKE ? AND {where_clause}", (token, *params)).fetchone()[0]
+        node_ids_cte = f"SELECT id, file_id FROM tokens WHERE token ILIKE ? AND {where_clause}"
+        node_params = (token, *params)
+
     if node_freq == 0:
         if not is_shared: conn.close()
         return []
-    
+
+    # 2. Unified SQL to get O11 and col_freq and calculate LL
     final_filter_sql = base_filter_sql + filter_sql
     final_params = base_filter_params + filter_params
-    
-    if pos_tag:
-        collocan_counts = safe_execute(conn, f"""
-            WITH node_ids AS (
-                SELECT id, file_id FROM tokens WHERE token ILIKE ? AND tag = ? AND {where_clause}
-            )
-            SELECT t2.token, t2.tag, COUNT(*) as O11, 
-                   SUM(CASE WHEN t2.id < n.id THEN 1 ELSE 0 END) as left_count, 
-                   SUM(CASE WHEN t2.id > n.id THEN 1 ELSE 0 END) as right_count
-            FROM node_ids n
-            JOIN tokens t2 ON t2.file_id = n.file_id 
-                AND t2.id BETWEEN n.id - ? AND n.id + ?
-                AND t2.id != n.id
-            WHERE {where_clause} {final_filter_sql}
-            GROUP BY t2.token, t2.tag
-            ORDER BY O11 DESC
-            LIMIT 200 
-        """, (token, pos_tag, *params, window, window, *params, *final_params)).fetchall()
-    else:
-        collocan_counts = safe_execute(conn, f"""
-            WITH node_ids AS (
-                SELECT id, file_id FROM tokens WHERE token ILIKE ? AND {where_clause}
-            )
-            SELECT t2.token, t2.tag, COUNT(*) as O11, 
-                   SUM(CASE WHEN t2.id < n.id THEN 1 ELSE 0 END) as left_count, 
-                   SUM(CASE WHEN t2.id > n.id THEN 1 ELSE 0 END) as right_count
-            FROM node_ids n
-            JOIN tokens t2 ON t2.file_id = n.file_id 
-                AND t2.id BETWEEN n.id - ? AND n.id + ?
-                AND t2.id != n.id
-            WHERE {where_clause} {final_filter_sql}
-            GROUP BY t2.token, t2.tag
-            ORDER BY O11 DESC
-            LIMIT 200 
-        """, (token, *params, window, window, *params, *final_params)).fetchall()
-    
-    results = []
-    for collocate, tag, O11, left_cnt, right_cnt in collocan_counts:
-        # Use ILIKE for collocate frequency to match the node's broad matching
-        col_freq = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE token ILIKE ? AND {where_clause}", (collocate, *params)).fetchone()[0]
-        
-        try:
-            # 1. Expected frequency
-            E11 = (node_freq * col_freq) / N
-            
-            # Simple fallback for tiny numbers
-            def safe_x_log_x_y(x, y):
-                if x <= 0 or y <= 0: return 0
-                return x * math.log(x / y)
-            
-            O12 = max(0, node_freq - O11)
-            O21 = max(0, col_freq - O11)
-            O22 = max(0, N - (node_freq + col_freq - O11))
-            
-            E12 = (node_freq * (N - col_freq)) / N
-            E21 = ((N - node_freq) * col_freq) / N
-            E22 = ((N - node_freq) * (N - col_freq)) / N
-            
-            # 2. Log-likelihood Calculation
-            # Skip if any expectation is 0 (impossible for valid co-occurrences but safe for floats)
-            if any(e <= 0 for e in [E11, E12, E21, E22]):
-                continue
 
-            LL = 2 * (safe_x_log_x_y(O11, E11) + 
-                      safe_x_log_x_y(O12, E12) + 
-                      safe_x_log_x_y(O21, E21) + 
-                      safe_x_log_x_y(O22, E22))
-            
-            # 3. Directionality check (Score should be positive for attraction)
-            # Dunning's LL is always positive, but we only care about O11 > E11
-            if O11 < E11:
-                LL = -LL
-            
-            results.append({
-                'collocate': collocate, 
-                'tag': tag,
-                'freq': O11, 
-                'score': LL,
-                'left': left_cnt, 
-                'right': right_cnt
-            })
-        except Exception as e:
-            # Silent skip for math errors
-            continue
-            
-    results.sort(key=lambda x: x['score'], reverse=True)
-    if not is_shared:
-        conn.close()
-    return results[:limit]
+    query = f"""
+        WITH node_ids AS ({node_ids_cte}),
+        o11_counts AS (
+            SELECT t2.token, t2.tag, COUNT(*) as O11, 
+                   SUM(CASE WHEN t2.id < n.id THEN 1 ELSE 0 END) as left_count, 
+                   SUM(CASE WHEN t2.id > n.id THEN 1 ELSE 0 END) as right_count
+            FROM node_ids n
+            JOIN tokens t2 ON t2.file_id = n.file_id 
+                AND t2.id BETWEEN n.id - ? AND n.id + ?
+                AND t2.id != n.id
+            WHERE {where_clause} {final_filter_sql}
+            GROUP BY t2.token, t2.tag
+        ),
+        col_freqs AS (
+            SELECT token, tag, COUNT(*) as col_freq
+            FROM tokens
+            WHERE {where_clause}
+            AND (token, tag) IN (SELECT token, tag FROM o11_counts)
+            GROUP BY token, tag
+        ),
+        stats AS (
+            SELECT 
+                o.token, o.tag, o.O11, o.left_count, o.right_count, f.col_freq,
+                CAST(? AS FLOAT) as NodeFreq, CAST(? AS FLOAT) as TotalN,
+                (NodeFreq * f.col_freq) / TotalN as E11,
+                (NodeFreq * (TotalN - f.col_freq)) / TotalN as E12,
+                ((TotalN - NodeFreq) * f.col_freq) / TotalN as E21,
+                ((TotalN - NodeFreq) * (TotalN - f.col_freq)) / TotalN as E22,
+                o.O11 as O11_f,
+                GREATEST(0, NodeFreq - o.O11) as O12,
+                GREATEST(0, f.col_freq - o.O11) as O21,
+                GREATEST(0, TotalN - (NodeFreq + f.col_freq - o.O11)) as O22
+            FROM o11_counts o
+            JOIN col_freqs f ON o.token = f.token AND o.tag = f.tag
+        )
+        SELECT token, tag, O11, left_count, right_count,
+               {_get_ll_sql('O11_f', 'E11', 'O12', 'E12', 'O21', 'E21', 'O22', 'E22')} as score
+        FROM stats
+        WHERE O11_f > E11
+        ORDER BY score DESC
+        LIMIT ?
+    """
+    
+    full_params = (*node_params, window, window, *params, *final_params, *params, node_freq, N, limit)
+    res = safe_execute(conn, query, full_params).fetchall()
+
+    results = []
+    for row in res:
+        results.append({
+            'collocate': row[0], 'tag': row[1], 'freq': row[2],
+            'left': row[3], 'right': row[4], 'score': row[5]
+        })
+
+    if not is_shared: conn.close()
+    return results
+
+def get_collocate_rank(token, collocate_to_rank, window=5, where_clause="1=1", params=(), stop_words=None, allowed_words=None, skip_punct=True, pos_tag=None):
+    results = get_collocates(token, window=window, limit=1000, where_clause=where_clause, params=params, stop_words=stop_words, allowed_words=allowed_words, skip_punct=skip_punct, pos_tag=pos_tag)
+    
+    for i, item in enumerate(results):
+        if item['collocate'].lower() == collocate_to_rank.lower():
+            return i + 1
+    return None
 
 def get_phrase_ngrams(phrase, limit=10, where_clause="1=1", params=(), stop_words=None, skip_punct=True):
     conn, is_shared = get_connection()
@@ -340,10 +332,6 @@ def get_phrase_ngrams(phrase, limit=10, where_clause="1=1", params=(), stop_word
     # We apply filters in the start_tokens part, but we also need the remaining conditions
     rem_cond = " AND ".join(conditions[1:])
     if rem_cond:
-        # We need to inject this into the matches CTE? 
-        # Actually, "start_tokens" filters t0. The joins filter t1..tn implicitly by structure but we need explicit token checks?
-        # Yes. joins just link IDs.
-        # But wait, joins are string literals constructed in loop.
         cte_query = f"""
             WITH start_tokens AS (
                 SELECT id, file_id 
@@ -377,9 +365,6 @@ def get_phrase_ngrams(phrase, limit=10, where_clause="1=1", params=(), stop_word
     results = {}
     
     # 1. Forward (Phrase + Next)
-    # n-gram size = length + 1
-    # value = phrase + " " + next
-    
     phrase_disp = " ".join(parts) # Display string
     
     results['forward'] = safe_execute(conn, f"""
@@ -403,9 +388,6 @@ def get_phrase_ngrams(phrase, limit=10, where_clause="1=1", params=(), stop_word
         ORDER BY freq DESC LIMIT ?
     """, (*full_params, *neighbor_params, limit)).fetchall()
     
-    # User mentioned: "red + snapper + word, and word + red + snapper".
-    # This matches 'forward' and 'backward'.
-    
     if not is_shared: conn.close()
     return results
 
@@ -414,10 +396,7 @@ def get_phrase_collocates(phrase, window=5, limit=20, where_clause="1=1", params
     parts = phrase.split()
     length = len(parts)
     
-    # 1. Frequency of Phrase (Node Freq)
-    # We can use get_phrase_metrics from frequency (circular import risk?) or re-implemented locally.
-    # Re-implement counting via CTE to stay self-contained
-    # Re-implement counting via CTE to stay self-contained
+    # 1. Node IDs logic
     joins = []
     conditions = []
     q_params = []
@@ -428,47 +407,30 @@ def get_phrase_collocates(phrase, window=5, limit=20, where_clause="1=1", params
         if i > 0:
             prev = f"t{i-1}"
             if skip_punct:
-                # Flexible window + negation check
                 joins.append(f"JOIN tokens {alias} ON {alias}.file_id = {prev}.file_id AND {alias}.id > {prev}.id AND {alias}.id <= {prev}.id + 4")
             else:
                 joins.append(f"JOIN tokens {alias} ON {prev}.id + 1 = {alias}.id AND {prev}.file_id = {alias}.file_id")
 
-    # Extra WHERE for skip_punct gap checks
     gap_checks = ""
     if skip_punct and len(parts) > 1:
         checks = []
         for i in range(1, len(parts)):
             prev = f"t{i-1}"
             curr = f"t{i}"
-            checks.append(f"""
-                NOT EXISTS (
-                    SELECT 1 FROM tokens GAP_{i} 
-                    WHERE GAP_{i}.file_id = t0.file_id 
-                    AND GAP_{i}.id > {prev}.id 
-                    AND GAP_{i}.id < {curr}.id 
-                    AND regexp_matches(GAP_{i}.token, '[a-zA-Z0-9]')
-                )
-            """)
+            checks.append(f"NOT EXISTS (SELECT 1 FROM tokens GAP_{i} WHERE GAP_{i}.file_id = t0.file_id AND GAP_{i}.id > {prev}.id AND GAP_{i}.id < {curr}.id AND regexp_matches(GAP_{i}.token, '[a-zA-Z0-9]'))")
         gap_checks = " AND " + " AND ".join(checks)
 
-    cte_base = f"""
-        WITH start_tokens AS (
-            SELECT id, file_id 
-            FROM tokens 
-            WHERE token ILIKE ? AND {where_clause}
-        ),
-        matches AS (
-            SELECT t0.id as start_id, t{length-1}.id as end_id, t0.file_id
-            FROM start_tokens t0
-            {" ".join(joins)}
-            {"WHERE " + " AND ".join(conditions[1:]) if len(conditions) > 1 else "WHERE 1=1"}
-            {gap_checks}
-        )
+    node_ids_cte = f"""
+        SELECT t0.id as start_id, t{length-1}.id as end_id, t0.file_id
+        FROM (SELECT id, file_id, token FROM tokens WHERE token ILIKE ? AND {where_clause}) t0
+        {" ".join(joins)}
+        WHERE 1=1
+        {" AND " + " AND ".join(conditions[1:]) if len(conditions) > 1 else ""}
+        {gap_checks}
     """
     
     base_params = (parts[0], *params, *q_params[1:])
-    
-    node_freq = safe_execute(conn, f"{cte_base} SELECT COUNT(*) FROM matches", base_params).fetchone()[0]
+    node_freq = safe_execute(conn, f"WITH matches AS ({node_ids_cte}) SELECT COUNT(*) FROM matches", base_params).fetchone()[0]
     
     if node_freq == 0:
         if not is_shared: conn.close()
@@ -478,7 +440,6 @@ def get_phrase_collocates(phrase, window=5, limit=20, where_clause="1=1", params
     
     # 2. Filters
     filter_sql, filter_params = parse_collocate_filter(allowed_words, alias="t2")
-    
     base_filter_sql = ""
     base_filter_params = []
     if stop_words:
@@ -491,63 +452,67 @@ def get_phrase_collocates(phrase, window=5, limit=20, where_clause="1=1", params
     final_filter_sql = base_filter_sql + filter_sql
     final_params = base_filter_params + filter_params
 
-    # 3. Count Collocates
-    # Window: start_id - window TO end_id + window
-    # Exclude: start_id TO end_id
+    # 3. Optimized Bulk Calculation
+    query = f"""
+        WITH matches AS ({node_ids_cte}),
+        o11_counts AS (
+            SELECT t2.token, t2.tag, COUNT(*) as O11,
+                   SUM(CASE WHEN t2.id < m.start_id THEN 1 ELSE 0 END) as left_count, 
+                   SUM(CASE WHEN t2.id > m.end_id THEN 1 ELSE 0 END) as right_count
+            FROM matches m
+            JOIN tokens t2 ON t2.file_id = m.file_id 
+                AND t2.id BETWEEN m.start_id - ? AND m.end_id + ?
+                AND (t2.id < m.start_id OR t2.id > m.end_id)
+            WHERE {where_clause} {final_filter_sql}
+            GROUP BY t2.token, t2.tag
+        ),
+        col_freqs AS (
+            SELECT token, tag, COUNT(*) as col_freq
+            FROM tokens
+            WHERE {where_clause}
+            AND (token, tag) IN (SELECT token, tag FROM o11_counts)
+            GROUP BY token, tag
+        ),
+        stats AS (
+            SELECT 
+                o.token, o.tag, o.O11, o.left_count, o.right_count, f.col_freq,
+                CAST(? AS FLOAT) as NodeFreq, CAST(? AS FLOAT) as TotalN,
+                (NodeFreq * f.col_freq) / TotalN as E11,
+                (NodeFreq * (TotalN - f.col_freq)) / TotalN as E12,
+                ((TotalN - NodeFreq) * f.col_freq) / TotalN as E21,
+                ((TotalN - NodeFreq) * (TotalN - f.col_freq)) / TotalN as E22,
+                o.O11 as O11_f,
+                GREATEST(0, NodeFreq - o.O11) as O12,
+                GREATEST(0, f.col_freq - o.O11) as O21,
+                GREATEST(0, TotalN - (NodeFreq + f.col_freq - o.O11)) as O22
+            FROM o11_counts o
+            JOIN col_freqs f ON o.token = f.token AND o.tag = f.tag
+        )
+        SELECT token, tag, O11, left_count, right_count,
+               {_get_ll_sql('O11_f', 'E11', 'O12', 'E12', 'O21', 'E21', 'O22', 'E22')} as score
+        FROM stats
+        WHERE O11_f > E11
+        ORDER BY score DESC
+        LIMIT ?
+    """
     
-    collocan_counts = safe_execute(conn, f"""
-        {cte_base}
-        SELECT t2.token, t2.tag, COUNT(*) as O11,
-               SUM(CASE WHEN t2.id < m.start_id THEN 1 ELSE 0 END) as left_count, 
-               SUM(CASE WHEN t2.id > m.end_id THEN 1 ELSE 0 END) as right_count
-        FROM matches m
-        JOIN tokens t2 ON t2.file_id = m.file_id 
-            AND t2.id BETWEEN m.start_id - ? AND m.end_id + ?
-            AND (t2.id < m.start_id OR t2.id > m.end_id)
-        WHERE {where_clause} {final_filter_sql}
-        GROUP BY t2.token, t2.tag
-        ORDER BY O11 DESC
-        LIMIT 200
-    """, (*base_params, window, window, *params, *final_params)).fetchall()
-    
-    results = []
-    for collocate, tag, O11, left_cnt, right_cnt in collocan_counts:
-        col_freq = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE token ILIKE ? AND {where_clause}", (collocate, *params)).fetchone()[0]
-        
-        try:
-            E11 = (node_freq * col_freq) / N
-            
-            def safe_x_log_x_y(x, y):
-                if x <= 0 or y <= 0: return 0
-                return x * math.log(x / y)
-            
-            O12 = max(0, node_freq - O11)
-            O21 = max(0, col_freq - O11)
-            O22 = max(0, N - (node_freq + col_freq - O11))
-            
-            E12 = (node_freq * (N - col_freq)) / N
-            E21 = ((N - node_freq) * col_freq) / N
-            E22 = ((N - node_freq) * (N - col_freq)) / N
-            
-            if any(e <= 0 for e in [E11, E12, E21, E22]): continue
+    full_params = (*base_params, window, window, *params, *final_params, *params, node_freq, N, limit)
+    res = safe_execute(conn, query, full_params).fetchall()
 
-            LL = 2 * (safe_x_log_x_y(O11, E11) + 
-                      safe_x_log_x_y(O12, E12) + 
-                      safe_x_log_x_y(O21, E21) + 
-                      safe_x_log_x_y(O22, E22))
-            
-            if O11 < E11: LL = -LL
-            
-            results.append({
-                'collocate': collocate, 
-                'tag': tag,
-                'freq': O11, 
-                'score': LL,
-                'left': left_cnt, 
-                'right': right_cnt
-            })
-        except: continue
-        
-    results.sort(key=lambda x: x['score'], reverse=True)
+    results = []
+    for row in res:
+        results.append({
+            'collocate': row[0], 'tag': row[1], 'freq': row[2],
+            'left': row[3], 'right': row[4], 'score': row[5]
+        })
+
     if not is_shared: conn.close()
-    return results[:limit]
+    return results
+
+def get_phrase_collocate_rank(phrase, collocate_to_rank, window=5, where_clause="1=1", params=(), stop_words=None, allowed_words=None, skip_punct=True):
+    results = get_phrase_collocates(phrase, window=window, limit=1000, where_clause=where_clause, params=params, stop_words=stop_words, allowed_words=allowed_words, skip_punct=skip_punct)
+    
+    for i, item in enumerate(results):
+        if item['collocate'].lower() == collocate_to_rank.lower():
+            return i + 1
+    return None

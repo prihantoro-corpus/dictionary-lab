@@ -26,6 +26,10 @@ def get_collocates(corpus_hash, token, window=5, limit=20, where_clause="1=1", p
     return collocation.get_collocates(token, window, limit, where_clause, params, stop_words, allowed_words, skip_punct, pos_tag)
 
 @st.cache_data(persist="disk", show_spinner=False)
+def get_collocate_rank(corpus_hash, token, collocate, window=5, where_clause="1=1", params=(), stop_words=None, allowed_words=None, skip_punct=True, pos_tag=None):
+    return collocation.get_collocate_rank(token, collocate, window, where_clause, params, stop_words, allowed_words, skip_punct, pos_tag)
+
+@st.cache_data(persist="disk", show_spinner=False)
 def get_kwic_lines(corpus_hash, token, window=7, limit=50, where_clause="1=1", params=(), pos_tag=None):
     return kwic.get_kwic_lines(token, window, limit, where_clause, params, pos_tag)
 
@@ -44,6 +48,10 @@ def get_phrase_ngrams(corpus_hash, phrase, limit=10, where_clause="1=1", params=
 @st.cache_data(persist="disk", show_spinner=False)
 def get_phrase_collocates(corpus_hash, phrase, window=5, limit=20, where_clause="1=1", params=(), stop_words=None, allowed_words=None, skip_punct=True):
     return collocation.get_phrase_collocates(phrase, window, limit, where_clause, params, stop_words, allowed_words, skip_punct)
+
+@st.cache_data(persist="disk", show_spinner=False)
+def get_phrase_collocate_rank(corpus_hash, phrase, collocate, window=5, where_clause="1=1", params=(), stop_words=None, allowed_words=None, skip_punct=True):
+    return collocation.get_phrase_collocate_rank(phrase, collocate, window, where_clause, params, stop_words, allowed_words, skip_punct)
 
 @st.cache_data(persist="disk", show_spinner=False)
 def get_phrase_kwic_lines(corpus_hash, phrase, window=7, limit=50, where_clause="1=1", params=(), skip_punct=True):

@@ -34,7 +34,17 @@ def render_clickable_word_row(label, words, key_prefix="nav", context=""):
     st.write(f"**{label}**:")
     cols = st.columns(len(words) if len(words) < 10 else 10)
     for i, w in enumerate(words[:20]): # Limit to 20 visually
-        cols[i % 10].button(w, key=f"{key_prefix}_{context}_{w}_{i}", on_click=cb_update_query, args=(w,))
+        cols[i % 10].button(w, key=f"{key_prefix}_{context}_{w}_{i}", on_click=cb_search_token, args=(w,))
+
+def render_ngram_badges(ngrams, key_prefix="ngram"):
+    """Renders N-grams as clickable badges."""
+    if not ngrams:
+        st.caption("-")
+        return
+    for i, row in enumerate(ngrams[:3]): # Show top 3
+        text = row[0]
+        freq = row[1]
+        st.button(f"{text} ({freq})", key=f"{key_prefix}_{i}_{text}", use_container_width=True, on_click=cb_search_token, args=(text,))
 
 def render_sense_editor(token, tag, initial_data):
     """
@@ -93,6 +103,12 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
         st.caption("You can also upload your own files or choose from the 'Available on Disk' collection.")
 
 
+    
+    # Main Title
+    st.markdown(
+        '<h1 style="text-align: center; color: #1d2a57; margin-bottom: 20px;">CORTEX DICTIONARY LAB</h1>',
+        unsafe_allow_html=True
+    )
     
     # Custom CSS for Professional Look
     st.markdown("""
@@ -216,6 +232,24 @@ def render_entry_tab(where_clause, params):
                 st.session_state.freq_list_page = min(total_pages - 1, page + 1)
                 st.rerun()
 
+def get_rank_html(label, rank):
+    """Returns HTML for a small box showing the collocation rank."""
+    if rank is None:
+        rank_text = ">500"
+        color = "#888"
+    else:
+        rank_text = f"#{rank}"
+        if rank <= 10: color = "#1d2a57"
+        elif rank <= 50: color = "#2196F3"
+        else: color = "#90CAF9"
+
+    return (
+        f'<div style="display:inline-flex; flex-direction:column; align-items:center; background:#f5f5f5; padding:6px 10px; border-radius:4px; border:1px solid #e0e0e0;">'
+        f'<span style="font-size:11px; color:#666; margin-bottom:2px;">{label}</span>'
+        f'<span style="font-weight:bold; font-size:16px; color:{color};">{rank_text}</span>'
+        f'</div>'
+    )
+
 def render_multiword_view(query, where_clause, params, stop_words, collocate_filter, skip_punct):
     """
     Renders the view for multi-word phrases.
@@ -309,7 +343,28 @@ def render_multiword_view(query, where_clause, params, stop_words, collocate_fil
     ]
     zipf_band_html = "".join(zipf_band_parts)
 
-    st.markdown(f'<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;"><span style="font-size: 24px;">Freq: <strong>{freq}</strong></span>{pmw_band_html}{zipf_band_html}</div>', unsafe_allow_html=True)
+    # Rank Boxes
+    parts = query.split()
+    rank_htmls = []
+    if len(parts) >= 2:
+        # P1: Node=all but last, Coll=last
+        n1, c1 = " ".join(parts[:-1]), parts[-1]
+        if len(parts[:-1]) > 1:
+            r1 = cache.get_phrase_collocate_rank(corpus_hash, n1, c1, where_clause=where_clause, params=params, skip_punct=skip_punct)
+        else:
+            r1 = cache.get_collocate_rank(corpus_hash, n1, c1, where_clause=where_clause, params=params, skip_punct=skip_punct)
+        rank_htmls.append(get_rank_html(f"Rank of '{c1}' for '{n1}'", r1))
+        
+        # P2: Node=all but first, Coll=first
+        n2, c2 = " ".join(parts[1:]), parts[0]
+        if len(parts[1:]) > 1:
+            r2 = cache.get_phrase_collocate_rank(corpus_hash, n2, c2, where_clause=where_clause, params=params, skip_punct=skip_punct)
+        else:
+            r2 = cache.get_collocate_rank(corpus_hash, n2, c2, where_clause=where_clause, params=params, skip_punct=skip_punct)
+        rank_htmls.append(get_rank_html(f"Rank of '{c2}' for '{n2}'", r2))
+
+    rank_container = " ".join(rank_htmls)
+    st.markdown(f'<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;"><span style="font-size: 24px;">Freq: <strong>{freq}</strong></span>{pmw_band_html}{zipf_band_html}{rank_container}</div>', unsafe_allow_html=True)
     
     # 5. External Links
     if language == 'English':
@@ -337,17 +392,11 @@ def render_multiword_view(query, where_clause, params, stop_words, collocate_fil
     c_fwd, c_bwd = st.columns(2)
     with c_fwd:
         st.caption("Phrase + Word")
-        if ngrams.get('forward'):
-             st.table(pd.DataFrame(ngrams['forward'], columns=['N-Gram', 'Freq']))
-        else:
-             st.caption("-")
+        render_ngram_badges(ngrams.get('forward', []), key_prefix=f"phrase_fwd_{query}")
              
     with c_bwd:
         st.caption("Word + Phrase")
-        if ngrams.get('backward'):
-             st.table(pd.DataFrame(ngrams['backward'], columns=['N-Gram', 'Freq']))
-        else:
-             st.caption("-")
+        render_ngram_badges(ngrams.get('backward', []), key_prefix=f"phrase_bwd_{query}")
 
     # 8. Collocates (Graph/List)
     st.divider()
@@ -365,9 +414,10 @@ def render_multiword_view(query, where_clause, params, stop_words, collocate_fil
                     with cols_grid[col_idx]:
                         for item in chunk:
                             col_txt = item['collocate']
+                            col_tag = item.get('tag', '')
                             score_val = item.get('score', 0)
                             freq_val = item.get('freq', 0)
-                            st.button(f"{col_txt} ({score_val:.1f})", key=f"p_coll_{col_txt}", help=f"Freq: {freq_val}", use_container_width=True, on_click=cb_search_token, args=(col_txt,))
+                            st.button(f"{col_txt} ({score_val:.1f})", key=f"p_coll_{col_txt}_{col_tag}", help=f"Freq: {freq_val}", use_container_width=True, on_click=cb_search_token, args=(col_txt,))
                             
         with c_tab2:
             st.caption("Collocates positioned by left/right dominance. Distance = Strength.")
@@ -709,16 +759,10 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                     b1, b2 = st.columns(2)
                     with b1:
                         st.caption(f"{query} + Word")
-                        if ngrams['bi_search_word']:
-                            st.table(pd.DataFrame(ngrams['bi_search_word'], columns=['Bigram', 'Freq']).head(5))
-                        else:
-                            st.caption("-")
+                        render_ngram_badges(ngrams.get('bi_search_word', []), key_prefix=f"bi_fwd_{query}_{tag}")
                     with b2:
                         st.caption(f"Word + {query}")
-                        if ngrams['bi_word_search']:
-                            st.table(pd.DataFrame(ngrams['bi_word_search'], columns=['Bigram', 'Freq']).head(5))
-                        else:
-                            st.caption("-")
+                        render_ngram_badges(ngrams.get('bi_word_search', []), key_prefix=f"bi_bwd_{query}_{tag}")
                     
                     # Download Bigrams
                     all_bi = []
@@ -733,22 +777,13 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                     t1, t2, t3 = st.columns(3)
                     with t1:
                         st.caption(f"{query}+W+W")
-                        if ngrams['tri_s_w_w']:
-                             st.table(pd.DataFrame(ngrams['tri_s_w_w'], columns=['Trigram', 'Freq']).head(5))
-                        else:
-                             st.caption("-")
+                        render_ngram_badges(ngrams.get('tri_s_w_w', []), key_prefix=f"tri_fwd_{query}_{tag}")
                     with t2:
                         st.caption(f"W+{query}+W")
-                        if ngrams['tri_w_s_w']:
-                             st.table(pd.DataFrame(ngrams['tri_w_s_w'], columns=['Trigram', 'Freq']).head(5))
-                        else:
-                             st.caption("-")
+                        render_ngram_badges(ngrams.get('tri_w_s_w', []), key_prefix=f"tri_mid_{query}_{tag}")
                     with t3:
                         st.caption(f"W+W+{query}")
-                        if ngrams['tri_w_w_s']:
-                             st.table(pd.DataFrame(ngrams['tri_w_w_s'], columns=['Trigram', 'Freq']).head(5))
-                        else:
-                             st.caption("-")
+                        render_ngram_badges(ngrams.get('tri_w_w_s', []), key_prefix=f"tri_bwd_{query}_{tag}")
                     
                     # Download Trigrams
                     all_tri = []
@@ -785,12 +820,13 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                                 with cols_grid[col_idx]:
                                     for item in chunk:
                                         col_txt = item['collocate']
+                                        col_tag = item.get('tag', '')
                                         score_val = item.get('score', item.get('LL', 0))
                                         freq_val = item.get('freq', 0)
                                         
                                         if st.button(
                                             f"{col_txt} ({score_val:.1f})", 
-                                            key=f"coll_{col_txt}_{tag}", 
+                                            key=f"coll_{col_txt}_{col_tag}_{tag}", 
                                             help=f"Frequency: {freq_val}\nLog-Likelihood: {score_val:.2f}",
                                             use_container_width=True
                                         ):

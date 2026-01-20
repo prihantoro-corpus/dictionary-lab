@@ -4,6 +4,9 @@ import os
 import json
 import tempfile
 from pipeline.indexing import get_connection
+import math
+
+CACHE_COLUMNS = ['id', 'token', 'tag', 'lemma', 'corpus', 'file_id', 'sentence_id', 'doc_id', 'sentence_num']
 from pipeline.overrides_io import load_overrides, save_overrides
 
 CORPORA_DIR = os.path.join(os.getcwd(), "corpora")
@@ -77,12 +80,15 @@ def get_metadata_values(key, corpora=None):
             where_sql = f"AND corpus IN ({placeholders})"
             params = list(corpora)
 
-        query = f"""
-            SELECT DISTINCT json_extract_string(metadata, '$.{key}') as v 
-            FROM tokens 
-            WHERE 1=1 {where_sql} 
-            ORDER BY v
-        """
+        if key in CACHE_COLUMNS:
+            query = f"SELECT DISTINCT {key} as v FROM tokens WHERE 1=1 {where_sql} ORDER BY v"
+        else:
+            query = f"""
+                SELECT DISTINCT json_extract_string(metadata, '$.{key}') as v 
+                FROM tokens 
+                WHERE 1=1 {where_sql} 
+                ORDER BY v
+            """
         res = conn.execute(query, params).fetchall()
         vals = [r[0] for r in res if r[0] is not None]
         # Add N/A if there are tokens without this metadata key
@@ -97,6 +103,15 @@ def get_metadata_values(key, corpora=None):
             conn.close()
 
 def render():
+    # Manual Link at the top
+    st.sidebar.markdown(
+        '<div style="text-align: center; margin-bottom: 10px;">'
+        '<a href="https://docs.google.com/document/d/1x-arcEkxjMc_9DeBYZUcGxnrWl0JW0Bj5_N6o_Jfyfc/edit?usp=sharing" '
+        'target="_blank" style="text-decoration: none; color: #1976d2; font-size: 16px; font-weight: bold;">'
+        '📖 Manual</a>'
+        '</div>',
+        unsafe_allow_html=True
+    )
     st.sidebar.title("DICTIONARY EDITOR")
     
     # Initialize session state
@@ -145,7 +160,7 @@ def render():
                 )
 
             # Step 2: Show appropriate interface based on mode
-            elif st.session_state['corpus_selection_mode'] == "File Upload":
+            if st.session_state['corpus_selection_mode'] == "File Upload":
                 st.caption("📤 Upload one or more corpus files:")
                 uploaded_files = st.file_uploader("Select files", type=None, accept_multiple_files=True, key="mono_upload")
                 if uploaded_files:
@@ -451,15 +466,26 @@ def render():
         else:
             if "None/N/A" in selected_vals:
                 actual_vals = [v for v in selected_vals if v != "None/N/A"]
-                if not actual_vals:
-                    where_parts.append(f"json_extract_string(metadata, '$.{key}') IS NULL")
+                if key in CACHE_COLUMNS:
+                    if not actual_vals:
+                        where_parts.append(f"{key} IS NULL")
+                    else:
+                        placeholders = ",".join(["?"] * len(actual_vals))
+                        where_parts.append(f"({key} IN ({placeholders}) OR {key} IS NULL)")
+                        params.extend(actual_vals)
                 else:
-                    placeholders = ",".join(["?"] * len(actual_vals))
-                    where_parts.append(f"(json_extract_string(metadata, '$.{key}') IN ({placeholders}) OR json_extract_string(metadata, '$.{key}') IS NULL)")
-                    params.extend(actual_vals)
+                    if not actual_vals:
+                        where_parts.append(f"json_extract_string(metadata, '$.{key}') IS NULL")
+                    else:
+                        placeholders = ",".join(["?"] * len(actual_vals))
+                        where_parts.append(f"(json_extract_string(metadata, '$.{key}') IN ({placeholders}) OR json_extract_string(metadata, '$.{key}') IS NULL)")
+                        params.extend(actual_vals)
             else:
                 placeholders = ",".join(["?"] * len(selected_vals))
-                where_parts.append(f"json_extract_string(metadata, '$.{key}') IN ({placeholders})")
+                if key in CACHE_COLUMNS:
+                    where_parts.append(f"{key} IN ({placeholders})")
+                else:
+                    where_parts.append(f"json_extract_string(metadata, '$.{key}') IN ({placeholders})")
                 params.extend(selected_vals)
             
     where_clause = " AND ".join(where_parts)
