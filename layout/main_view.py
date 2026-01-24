@@ -106,7 +106,7 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
     
     # Main Title
     st.markdown(
-        '<h1 style="text-align: center; color: #1d2a57; margin-bottom: 20px;">CORTEX DICTIONARY LAB</h1>',
+        '<h1 style="text-align: center; color: #ffffff; margin-bottom: 20px;">CORTEX DICTIONARY LAB</h1>',
         unsafe_allow_html=True
     )
     
@@ -367,12 +367,17 @@ def render_multiword_view(query, where_clause, params, stop_words, collocate_fil
     st.markdown(f'<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;"><span style="font-size: 24px;">Freq: <strong>{freq}</strong></span>{pmw_band_html}{zipf_band_html}{rank_container}</div>', unsafe_allow_html=True)
     
     # 5. External Links
+    def_url, img_url = components.get_google_links(query, language)
+    google_links_html = f"<a href=\"{def_url}\" target=\"_blank\">Google Definition</a> • <a href=\"{img_url}\" target=\"_blank\">Google Images</a>"
+
     if language == 'English':
         ph_collins = query.replace(" ", "-")
-        st.markdown(f"<div style=\"font-size:12px; margin-top:5px;\"><a href=\"https://www.collinsdictionary.com/dictionary/english/{ph_collins}\" target=\"_blank\">Collins Dictionary</a> • <a href=\"https://www.collinsdictionary.com/dictionary/english-thesaurus/{ph_collins}\" target=\"_blank\">Thesaurus</a></div>", unsafe_allow_html=True)
+        st.markdown(f"<div style=\"font-size:12px; margin-top:5px;\"><a href=\"https://www.collinsdictionary.com/dictionary/english/{ph_collins}\" target=\"_blank\">Collins Dictionary</a> • <a href=\"https://www.collinsdictionary.com/dictionary/english-thesaurus/{ph_collins}\" target=\"_blank\">Thesaurus</a> • {google_links_html}</div>", unsafe_allow_html=True)
     elif language == 'Indonesian':
         ph_kbbi = query.replace(" ", "%20")
-        st.markdown(f"<div style=\"font-size:12px; margin-top:5px;\"><a href=\"https://kbbi.kemendikdasmen.go.id/entri/{ph_kbbi}\" target=\"_blank\">KBBI (Kemendikbud)</a> • <a href=\"https://tesaurus.kemendikdasmen.go.id/tematis/lema/{ph_kbbi}\" target=\"_blank\">Tesaurus</a></div>", unsafe_allow_html=True)
+        st.markdown(f"<div style=\"font-size:12px; margin-top:5px;\"><a href=\"https://kbbi.kemendikdasmen.go.id/entri/{ph_kbbi}\" target=\"_blank\">KBBI (Kemendikbud)</a> • <a href=\"https://tesaurus.kemendikdasmen.go.id/tematis/lema/{ph_kbbi}\" target=\"_blank\">Tesaurus</a> • {google_links_html}</div>", unsafe_allow_html=True)
+    else:
+        st.markdown(f"<div style=\"font-size:12px; margin-top:5px;\">{google_links_html}</div>", unsafe_allow_html=True)
 
     st.divider()
 
@@ -507,6 +512,23 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                 st.info("Check your sidebar selections to unhide this data.")
             else:
                 st.error(f"❌ **{query}** was not found in the current database.")
+                
+                st.markdown("---")
+                st.write("Would you like to create a new dictionary entry for this word?")
+                if st.button(f"➕ Create Entry for '{query}'"):
+                    if query not in st.session_state['overrides']:
+                         st.session_state['overrides'][query] = {}
+                    # Create a default "General" sense to get them started
+                    st.session_state['overrides'][query]['General'] = {
+                        "definition": "",
+                        "frequency": 0,
+                        "is_manual": True
+                    }
+                    # Auto-save
+                    p_path = st.session_state.get('personal_file_path')
+                    if p_path:
+                        save_overrides(p_path, st.session_state['overrides'])
+                    st.rerun()
             
             # Fuzzy match as fallback for typos
             fuzzy = search.search_fuzzy(query)
@@ -698,8 +720,11 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                 """, unsafe_allow_html=True)
                 
                 # Dictionary and Thesaurus Links (language-specific)
+                def_url, img_url = components.get_google_links(query, language)
+                google_links_html = f"<a href=\"{def_url}\" target=\"_blank\">Google Definition</a> • <a href=\"{img_url}\" target=\"_blank\">Google Images</a>"
+
                 if language == 'English':
-                    st.markdown(f"<div style=\"font-size:12px; margin-top:5px;\"><a href=\"https://www.collinsdictionary.com/dictionary/english/{query}\" target=\"_blank\">Collins Dictionary</a> • <a href=\"https://www.collinsdictionary.com/dictionary/english-thesaurus/{query}\" target=\"_blank\">Thesaurus</a></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style=\"font-size:12px; margin-top:5px;\"><a href=\"https://www.collinsdictionary.com/dictionary/english/{query}\" target=\"_blank\">Collins Dictionary</a> • <a href=\"https://www.collinsdictionary.com/dictionary/english-thesaurus/{query}\" target=\"_blank\">Thesaurus</a> • {google_links_html}</div>", unsafe_allow_html=True)
                 elif language == 'Indonesian':
                     # Single line construction for Indonesian links
                     indo_links = [
@@ -707,8 +732,9 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                         f"<a href=\"https://kbbi.web.id/{query}\" target=\"_blank\">KBBI (Web)</a>",
                         f"<a href=\"https://tesaurus.kemendikdasmen.go.id/tematis/lema/{query}\" target=\"_blank\">Tesaurus</a>"
                     ]
-                    st.markdown(f"<div style=\"font-size:12px; margin-top:5px;\">{' • '.join(indo_links)}</div>", unsafe_allow_html=True)
-                # For 'Other' languages, no dictionary links
+                    st.markdown(f"<div style=\"font-size:12px; margin-top:5px;\">{' • '.join(indo_links)} • {google_links_html}</div>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"<div style=\"font-size:12px; margin-top:5px;\">{google_links_html}</div>", unsafe_allow_html=True)
                 
                 # Navigation Rows
                 render_clickable_word_row("Words from same Lemma", same_lemma_words, key_prefix="lemma", context=tag)
@@ -729,8 +755,7 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                     "manual_collo_ex": override.get('manual_collo_ex', '')
                 })
                 
-                # External Links
-                st.markdown(f"<div style='font-size:12px; margin-top:5px;'><a href='https://www.collinsdictionary.com/dictionary/english/{query}' target='_blank'>Collins Dictionary</a> • <a href='https://www.collinsdictionary.com/dictionary/english-thesaurus/{query}' target='_blank'>Thesaurus</a></div>", unsafe_allow_html=True)
+
                 
                 st.divider()
                 

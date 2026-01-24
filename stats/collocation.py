@@ -79,7 +79,8 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, 
     neighbor_params = []
     
     if skip_punct:
-        neighbor_filter += " AND regexp_matches(token, '[a-zA-Z0-9]')"
+        # Match alphanumeric OR any non-ASCII character (to support intl scripts)
+        neighbor_filter += " AND regexp_matches(token, '([a-zA-Z0-9]|[^\\x00-\\x7F])')"
     
     if stop_words:
         placeholders = ",".join(["?"] * len(stop_words))
@@ -196,7 +197,8 @@ def get_collocates(token, window=5, limit=20, where_clause="1=1", params=(), sto
         base_filter_sql += f" AND t2.token NOT IN ({placeholders})"
         base_filter_params.extend(stop_words)
     if skip_punct:
-         base_filter_sql += " AND regexp_matches(t2.token, '[a-zA-Z0-9]')"
+         # Match alphanumeric OR any non-ASCII character
+         base_filter_sql += " AND regexp_matches(t2.token, '([a-zA-Z0-9]|[^\\x00-\\x7F])')"
 
     # 1. Get Node Freq and Total N
     N = safe_execute(conn, f"SELECT COUNT(*) FROM tokens WHERE {where_clause}", params).fetchone()[0]
@@ -294,7 +296,7 @@ def get_phrase_ngrams(phrase, limit=10, where_clause="1=1", params=(), stop_word
     neighbor_filter = ""
     neighbor_params = []
     if skip_punct:
-        neighbor_filter += " AND regexp_matches(token, '[a-zA-Z0-9]')"
+        neighbor_filter += " AND regexp_matches(token, '([a-zA-Z0-9]|[^\\x00-\\x7F])')"
     if stop_words:
         placeholders = ",".join(["?"] * len(stop_words))
         neighbor_filter += f" AND token NOT IN ({placeholders})"
@@ -417,7 +419,7 @@ def get_phrase_collocates(phrase, window=5, limit=20, where_clause="1=1", params
         for i in range(1, len(parts)):
             prev = f"t{i-1}"
             curr = f"t{i}"
-            checks.append(f"NOT EXISTS (SELECT 1 FROM tokens GAP_{i} WHERE GAP_{i}.file_id = t0.file_id AND GAP_{i}.id > {prev}.id AND GAP_{i}.id < {curr}.id AND regexp_matches(GAP_{i}.token, '[a-zA-Z0-9]'))")
+            checks.append(f"NOT EXISTS (SELECT 1 FROM tokens GAP_{i} WHERE GAP_{i}.file_id = t0.file_id AND GAP_{i}.id > {prev}.id AND GAP_{i}.id < {curr}.id AND regexp_matches(GAP_{i}.token, '([a-zA-Z0-9]|[^\\x00-\\x7F])'))")
         gap_checks = " AND " + " AND ".join(checks)
 
     node_ids_cte = f"""
@@ -447,7 +449,7 @@ def get_phrase_collocates(phrase, window=5, limit=20, where_clause="1=1", params
         base_filter_sql += f" AND t2.token NOT IN ({placeholders})"
         base_filter_params.extend(stop_words)
     if skip_punct:
-         base_filter_sql += " AND regexp_matches(t2.token, '[a-zA-Z0-9]')"
+         base_filter_sql += " AND regexp_matches(t2.token, '([a-zA-Z0-9]|[^\\x00-\\x7F])')"
 
     final_filter_sql = base_filter_sql + filter_sql
     final_params = base_filter_params + filter_params

@@ -1,4 +1,31 @@
 import streamlit as st
+import urllib.parse
+
+def get_google_links(query, language):
+    """
+    Returns tuple (def_url, img_url) for Google Search.
+    """
+    q_plus = urllib.parse.quote_plus(query)
+    
+    if language == 'Indonesian':
+        def_url = f"https://www.google.com/search?q=apa+itu+%27{q_plus}%27"
+    elif language == 'Chinese':
+        def_url = f"https://www.google.com/search?q=什么是'{q_plus}'"
+    elif language == 'Japanese':
+         def_url = f"https://www.google.com/search?q='{q_plus}'+とは"
+    elif language == 'Korean':
+         def_url = f"https://www.google.com/search?q='{q_plus}'+이란"
+    elif language == 'Arabic':
+         def_url = f"https://www.google.com/search?q=ما+هو+'{q_plus}'"
+    elif language == 'Javanese':
+         def_url = f"https://www.google.com/search?q=apa+kuwi+'{q_plus}'"
+    else:
+        # Default/English
+        def_url = f"https://www.google.com/search?q=what+is+%27{q_plus}%27"
+        
+    img_url = f"https://www.google.com/search?tbm=isch&q={q_plus}"
+    
+    return def_url, img_url
 
 def render_pmw_bar(pmw, max_pmw=5000):
     """
@@ -71,6 +98,17 @@ def render_collocate_example(left, node, right, col_token=None, translation=None
     """, unsafe_allow_html=True)
 
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+
+# Configure Matplotlib to use fonts that support CJK and other scripts
+# Priority list for Windows/Standard fonts covering multiple languages
+plt.rcParams['font.family'] = ['sans-serif']
+plt.rcParams['font.sans-serif'] = [
+    'Microsoft YaHei', 'SimHei', 'Malgun Gothic', 'Meiryo', 'Arial Unicode MS', 
+    'Segoe UI', 'sans-serif'
+]
+# Ensure minus sign is rendered correctly
+plt.rcParams['axes.unicode_minus'] = False
 
 import numpy as np
 
@@ -193,6 +231,9 @@ def render_collocate_chart(collocates, node_word="", chart_size=1.0):
             
             # Distance (Inverse to score)
             r = max_dist - (norm * (max_dist - min_dist))
+            
+            # Size (Proportional to score)
+            s = bubble_min_size + (norm * (bubble_max_size - bubble_min_size))
             
             # Size (Proportional to score)
             s = bubble_min_size + (norm * (bubble_max_size - bubble_min_size))

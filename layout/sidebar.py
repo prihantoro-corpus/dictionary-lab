@@ -154,8 +154,8 @@ def render():
                 st.caption("Select Source Language:")
                 st.session_state['corpus_language'] = st.selectbox(
                     "Source Language", 
-                    ['English', 'Indonesian', 'Other'], 
-                    index=['English', 'Indonesian', 'Other'].index(st.session_state['corpus_language']),
+                    ['English', 'Indonesian', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'], 
+                    index=['English', 'Indonesian', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'].index(st.session_state['corpus_language']) if st.session_state['corpus_language'] in ['English', 'Indonesian', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'] else 7,
                     key="mono_lang"
                 )
 
@@ -193,7 +193,7 @@ def render():
                 # Box 1: Source
                 with st.container(border=True):
                     st.markdown("**1. Source Corpus**")
-                    src_lang = st.selectbox("Source Language", ['English', 'Indonesian', 'Other'], index=0, key="p_src_lang")
+                    src_lang = st.selectbox("Source Language", ['English', 'Indonesian', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'], index=0, key="p_src_lang")
                     st.session_state['corpus_language'] = src_lang
                     
                     if st.session_state['corpus_selection_mode'] == "File Upload":
@@ -204,7 +204,7 @@ def render():
                 # Box 2: Target
                 with st.container(border=True):
                     st.markdown("**2. Target Corpus**")
-                    tgt_lang = st.selectbox("Target Language", ['English', 'Indonesian', 'Other'], index=1, key="p_tgt_lang")
+                    tgt_lang = st.selectbox("Target Language", ['English', 'Indonesian', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'], index=1, key="p_tgt_lang")
                     st.session_state['target_language'] = tgt_lang
                     
                     if st.session_state['corpus_selection_mode'] == "File Upload":
