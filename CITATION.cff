@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+title: "CORTEX Dictionary Lab"
+message: "If you use this software, please cite it as below."
+type: software
+authors:
+  - given-names: Prihantoro
+    family-names: Prihantoro
+    affiliation: Corpus Media
+repository-code: "https://github.com/prihantoro-corpus/dictionary-lab"
+url: "https://dictionary-lab.streamlit.app/"
+abstract: >
+  Cortex Dictionary Lab is a web-based application for exploring and managing
+  dictionary and lexical data.
+keywords:
+  - lexicography
+  - dictionary
+  - NLP
+  - Streamlit
+license: MIT
