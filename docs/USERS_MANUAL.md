@@ -66,7 +66,7 @@ CORTEX Dictionary Lab offers cutting-edge capabilities for corpus linguistics an
   - Custom examples and collocates
 - **Persistent Storage**: JSON-based personal overrides file
 - **Corpus Integration**: Combine manual edits with corpus-derived data
-- **AI-Powered Assistance**: Generate definitions and examples automatically
+- **AI-Powered Assistance**: Generate definitions and examples automatically via Local (Ollama) or Cloud (Google Gemini) models.
 - **Batch Export**: Download complete frequency lists with definitions
 
 ---
@@ -103,6 +103,11 @@ The sidebar is your main control center:
 - **Load/Sync**: Load existing overrides or sync changes from the file
 
 - **Collocate Filter**: Whitelist specific words for collocate analysis
+
+#### 📝 User-Defined Wordlists
+- **Upload Own Wordlists**: You can upload standard text `.txt` files containing one word per line.
+- **Save and Apply**: Click "Save Wordlists" to make them active.
+- **Visual Badges**: Words from these custom lists will automatically appear as badges on the Dictionary Entry view (similar to standard GSL/AWL badges), helping you tag or categorize words according to your own custom vocabulary lists.
 
 #### 🤖 AI Assistant
 - **AI Provider**: Choose between "None", "Local (Ollama)", or "Google Gemini"
@@ -144,6 +149,10 @@ sentence	NN	sentence
 - **Purpose**: Allows filtering by source file using metadata filters
 - **Example**: `economy.txt` → `<root attribute="economy">`
 
+#### Additional XML Metadata (e.g., BAWE Corpus)
+- **Text ID**: `<text id="filename">` tags are parsed resulting in an `id="filename"` metadata attribute.
+- **Structure Segments**: `<structure segment="abstract">` and similar XML structure tags are fully supported and their attributes become filterable metadata.
+
 ---
 
 ## 3. Searching
@@ -168,7 +177,7 @@ This is the default view after searching.
   - **Frequency**: Raw count in the filtered corpus
   - **PMW**: Per Million Words (relative frequency)
   - **Zipf Band**: 1-5 scale (1 = very rare, 5 = very common)
-- **Badges**: Wordlist status (e.g., GSL, AWL, CEFR levels)
+- **Badges**: Wordlist status indicators. Built-in lists include GSL, AWL, CEFR levels. Additionally, any active **User-Defined Wordlists** uploaded via the sidebar will appear here as customized badges.
 - **Sense Definitions**: View and edit definitions for different POS tags
 - **External Links**: Quick access to Collins Dictionary, KBBI (Indonesian), Google Search, etc.
 
@@ -245,10 +254,10 @@ You can turn the corpus tool into a dictionary editor.
      - **KWIC Examples**: Format: `left | node | right` (one per line)
      - **Collocate Examples**: Format: `collocate | left | node | right` (one per line)
 3. **✨ Generate with AI**: (Requires AI enabled in sidebar)
-   - Click to automatically analyze the word using your selected AI model
-   - The AI uses context from your current corpus to create accurate suggestions
-   - Preview suggested definitions, examples, and collocates
-   - Click "Apply AI Suggestions" to populate the form fields
+   - Click to automatically analyze the word using your selected AI model (Ollama or Gemini).
+   - The AI uses context from your current corpus (N-grams, Collocates, and KWIC) to create accurate suggestions for the specific POS.
+   - You can preview the suggested definitions, examples, and phonetic transcription.
+   - Click "Apply AI Suggestions" to populate the form fields. (If the generation fails or produces unexpected JSON, click again to retry).
 4. **Save**: Click "Save Changes" to write to your `personal_overrides.json`
 
 ### Adding a New Sense
@@ -383,7 +392,9 @@ You can turn the corpus tool into a dictionary editor.
 
 ### Vertical File Format
 ```
+<text id="sample_01">
 <doc id="1">
+<structure segment="abstract">
 <s>
 This	DET	this
 is	COP	be
@@ -391,12 +402,14 @@ a	DET	a
 sentence	NN	sentence
 .	PUNCT	.
 </s>
+</structure>
 <s>
 Another	DET	another
 sentence	NN	sentence
 .	PUNCT	.
 </s>
 </doc>
+</text>
 ```
 
 ---

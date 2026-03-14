@@ -1,6 +1,6 @@
 streamlit
-# *.duckdb
-# *.db
+duckdb
+stanza
 openpyxl
 xlsxwriter
 matplotlib

@@ -30,7 +30,9 @@ For a Node word ($n$) and a Collocate candidate ($c$), we construct a $2 \times 
 |---|---|---|---|
 | **Node ($n$)** | $O_{11}$ | $O_{12}$ | $R_1$ (Freq of $n$) |
 | **Not Node ($\neg n$)** | $O_{21}$ | $O_{22}$ | $R_2$ |
-| **Totals** | $C_1$ (Freq of $c$) | $C_2$ | $N$ (Total Tokens) |
+| **Totals** | $C_1$ (Freq of $c$) | $C_2$ | $N$ (Total Tokens in Filter) |
+
+*Note on Collocate Filtering*: If a user specifies a "Collocate Filter" (whitelist), the Contingency Table ($O_{11}$ occurrence) and subsequent Log-Likelihood ($G^2$) scores are only computed where the candidate $c$ matches the whitelist. The Total Tokens $N$ reflects the total tokens of the currently filtered sub-corpus, not just the whitelisted tokens.
 
 Where:
 - $O_{11}$: Observed frequency of $n$ and $c$ appearing together within the window span (default $\pm 5$).

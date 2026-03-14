@@ -24,8 +24,10 @@ CORTEX Dictionary Lab is a stream-processing web application built with **Stream
 - **Sense-level Control**: Multiple POS senses per word
 - **Personal Overrides**: JSON-based persistent storage
 - **Corpus Integration**: Combine manual and corpus-derived data
+- **AI-Powered Assistance**: Generate definitions and examples automatically using local (Ollama) or cloud (Google Gemini) models
 
 ---
+
 
 ## Backend Stack
 - **Language**: Python 3.9+
@@ -33,6 +35,7 @@ CORTEX Dictionary Lab is a stream-processing web application built with **Stream
 - **Database**: DuckDB (`dictionary.duckdb`)
 - **Data Processing**: Pandas, NumPy
 - **NLP**: Stanza (multi-language), `eng_to_ipa`, custom implementations
+- **AI Integration**: `google-generativeai` (Gemini), `requests` (Ollama) via `utils/ai_helper.py`
 - **Visualization**: Matplotlib (network graphs, frequency bands)
 
 ---
@@ -77,6 +80,7 @@ Contains logic for checking words against standard lists (GSL, AWL, CEFR) and re
 ### `utils/`
 Utility functions for language-specific processing.
 - **`indo_g2p.py`**: Indonesian grapheme-to-phoneme conversion
+- **`ai_helper.py`**: Manages API connections and prompt generation for the AI Assistant (Ollama & Gemini)
 
 ### `docs/`
 Documentation files.
@@ -192,7 +196,7 @@ Heavy SQL queries are cached using `@st.cache_data`:
 
 ### Metadata as JSON
 Flexible metadata storage allows:
-- Custom attributes from XML tags
+- Custom attributes from XML tags (e.g., `<text id="filename">`, `<structure segment="abstract">`)
 - File-based filtering via `attribute` field
 - Genre, year, author, and other domain-specific metadata
 - Complex filtering without schema changes
@@ -241,6 +245,15 @@ def get_parallel_extra(src_results, tgt_corpus):
     # Match by doc_id and sentence_num
     # Fetch aligned sentence from target corpus
     # Append as 'translation' field
+```
+
+### AI Dictionary Generation
+```python
+# utils/ai_helper.py
+def generate_entry(self, word, context_sentences, pos_tag=None):
+    # Formats the system prompt with corpus context
+    # Calls Ollama (local) or Gemini (cloud)
+    # Returns structured JSON with definition, phonetic, collocates, examples
 ```
 
 ---
@@ -332,6 +345,10 @@ token	POS	lemma
 - `stanza` - Multi-language NLP
 - `eng_to_ipa` - English pronunciation
 - `Levenshtein` - Fuzzy matching
+
+### AI APIs
+- `google-generativeai` - Google Gemini integration
+- `requests` - Local Ollama API connections
 
 ### Visualization
 - `matplotlib` - Charts and graphs
