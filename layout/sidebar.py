@@ -241,7 +241,7 @@ def render():
                             
                             corpus_name_display = os.path.splitext(uploaded_file.name)[0]
                             try:
-                                parser.process_file(tmp_path, corpus_name_display)
+                                parser.process_file(tmp_path, corpus_name_display, lang_code=st.session_state.get('corpus_language', 'English'))
                                 loaded_names.append(corpus_name_display)
                             except Exception as e:
                                 if "used by another process" in str(e):
@@ -266,7 +266,7 @@ def render():
                        if selection in clean_to_disk:
                            disk_key = clean_to_disk[selection]
                            f_path = os.path.join(CORPORA_DIR, disk_corpora_map[disk_key])
-                           parser.process_file(f_path, selection)
+                           parser.process_file(f_path, selection, lang_code=st.session_state.get('corpus_language') if label == "SRC" else st.session_state.get('target_language'))
                            return selection
                        return None
                    else:
@@ -276,7 +276,7 @@ def render():
                            with os.fdopen(tmp_fd, 'wb') as tmp:
                                tmp.write(selection.getvalue())
                            name = os.path.splitext(selection.name)[0]
-                           parser.process_file(tmp_path, name)
+                           parser.process_file(tmp_path, name, lang_code=st.session_state.get('corpus_language') if label == "SRC" else st.session_state.get('target_language'))
                            return name
                        finally:
                            if os.path.exists(tmp_path): os.remove(tmp_path)
@@ -314,7 +314,7 @@ def render():
                             disk_key = clean_to_disk[corpus_clean_name]
                             f_path = os.path.join(CORPORA_DIR, disk_corpora_map[disk_key])
                             try:
-                                parser.process_file(f_path, corpus_clean_name)
+                                parser.process_file(f_path, corpus_clean_name, lang_code=st.session_state.get('corpus_language', 'English'))
                                 loaded_names.append(corpus_clean_name)
                             except Exception as e:
                                 if "used by another process" in str(e):
@@ -344,6 +344,44 @@ def render():
                 st.session_state['staged_files'] = []
                 st.session_state['staged_builtin'] = []
                 st.rerun()
+
+    # --- User-Defined Wordlists ---
+    with st.sidebar.expander("📝 User-Defined Wordlists", expanded=False):
+        st.caption("Upload .txt files to check against your corpus searches. One word per line.")
+        uploaded_wordlists = st.file_uploader("Upload Wordlists (.txt)", type=['txt'], accept_multiple_files=True, key="user_wl_upload")
+        
+        if uploaded_wordlists:
+            if st.button("💾 Save Wordlists", use_container_width=True, key="save_wl"):
+                from wordlist import manager
+                # Ensure wordlist directory exists
+                if not os.path.exists("wordlist"):
+                    os.makedirs("wordlist")
+                    
+                saved_count = 0
+                for wl_file in uploaded_wordlists:
+                    file_path = os.path.join("wordlist", wl_file.name)
+                    try:
+                        with open(file_path, "wb") as f:
+                            f.write(wl_file.getvalue())
+                        saved_count += 1
+                    except Exception as e:
+                        st.error(f"Failed to save {wl_file.name}: {e}")
+                
+                if saved_count > 0:
+                    st.success(f"Saved {saved_count} wordlist(s)!")
+                    # Clear the cache so it reloads immediately
+                    manager._cache = {}
+                    st.rerun()
+                    
+        # Show existing user lists
+        try:
+            val_files = [f for f in os.listdir("wordlist") if f.endswith(".txt") and f.lower() != "basic_english.csv"] 
+            if val_files:
+                st.caption("**Active Wordlists:**")
+                for f in val_files:
+                    st.write(f"- `{f}`")
+        except:
+            pass
 
     # --- Personal Overrides File (Persistence) ---
     with st.sidebar.expander("🛠️ Personal Overrides Management", expanded=True):
@@ -453,6 +491,142 @@ def render():
     
     stop_words = [s.strip() for s in stop_words_str.split(',')] if stop_words_str else []
     collocate_filter = [s.strip() for s in collocate_filter_str.split(',')] if collocate_filter_str else []
+    
+    # AI Assistant Configuration
+    st.sidebar.divider()
+    st.sidebar.subheader("🤖 AI Assistant")
+    
+    ai_provider = st.sidebar.radio(
+        "AI Provider",
+        ["None", "Local (Ollama)", "Google Gemini"],
+        key="ai_provider",
+        help="Enable AI to help generate dictionary entries"
+    )
+    
+    if ai_provider == "Local (Ollama)":
+        # Initialize or fetch Ollama models
+        if 'ollama_models' not in st.session_state or not st.session_state['ollama_models']:
+            try:
+                from utils.ai_helper import AIHelper
+                temp_helper = AIHelper(provider="ollama")
+                res = temp_helper.test_connection()
+                if res['success']:
+                    st.session_state['ollama_models'] = res['models']
+                else:
+                    st.session_state['ollama_models'] = ["llama3.2", "llama3.1", "mistral", "phi"]
+            except:
+                st.session_state['ollama_models'] = ["llama3.2", "llama3.1", "mistral", "phi"]
+        
+        # Ensure default models are in the list if they are standard but not pulled yet
+        base_models = ["llama3.2", "llama3.1", "mistral", "phi"]
+        for bm in base_models:
+            if bm not in st.session_state['ollama_models']:
+                st.session_state['ollama_models'].append(bm)
+        
+        # Model Dropdown
+        display_models = sorted(list(set(st.session_state['ollama_models']))) + ["custom"]
+        
+        # Ensure currently selected model is in the list
+        curr_model = st.session_state.get('ollama_model', 'llama3.2')
+        if curr_model not in display_models:
+            display_models = [curr_model] + display_models
+
+        ollama_model = st.sidebar.selectbox(
+            "Ollama Model",
+            display_models,
+            key="ollama_model",
+            help="Select the Ollama model to use"
+        )
+        if ollama_model == "custom":
+            st.sidebar.text_input(
+                "Custom Model Name",
+                key="ollama_custom_model",
+                placeholder="model:tag"
+            )
+        
+        col_test, col_refresh = st.sidebar.columns(2)
+        
+        # Test connection button
+        if col_test.button("Test Connection", key="test_ollama", use_container_width=True):
+            try:
+                from utils.ai_helper import AIHelper
+                model = ollama_model if ollama_model != "custom" else st.session_state.get('ollama_custom_model', 'llama3.2')
+                helper = AIHelper(provider="ollama", model=model)
+                result = helper.test_connection()
+                if result['success']:
+                    st.session_state['ollama_models'] = result['models']
+                    models_str = ", ".join(result.get('models', []))
+                    st.sidebar.success(f"✅ {result['message']}\n\n**Models:** {models_str}")
+                else:
+                    st.sidebar.error(result['message'])
+            except Exception as e:
+                st.sidebar.error(f"Connection failed: {str(e)}")
+        
+        if col_refresh.button("Refresh Models", key="refresh_ollama", use_container_width=True):
+            try:
+                from utils.ai_helper import AIHelper
+                temp_helper = AIHelper(provider="ollama")
+                res = temp_helper.test_connection()
+                if res['success']:
+                    st.session_state['ollama_models'] = res['models']
+                    st.sidebar.success(f"Fetched {len(res['models'])} models")
+                    st.rerun()
+                else:
+                    st.sidebar.error("Could not fetch models. Is Ollama running?")
+            except Exception as e:
+                st.sidebar.error(f"Fetch failed: {e}")
+        
+        st.sidebar.caption("💡 Make sure Ollama is running on localhost:11434")
+        
+    elif ai_provider == "Google Gemini":
+        api_key = st.sidebar.text_input(
+            "Gemini API Key",
+            type="password",
+            key="gemini_api_key",
+            help="Get your API key from https://aistudio.google.com/apikey"
+        )
+        
+        gemini_model = st.sidebar.selectbox(
+            "Gemini Model",
+            ["gemini-2.0-flash-exp", "gemini-1.5-pro", "gemini-1.5-flash"],
+            key="gemini_model"
+        )
+        
+        # Test connection button
+        if api_key and st.sidebar.button("Test Gemini Connection", key="test_gemini"):
+            try:
+                from utils.ai_helper import AIHelper
+                helper = AIHelper(provider="gemini", api_key=api_key, model=gemini_model)
+                result = helper.test_connection()
+                if result['success']:
+                    st.sidebar.success(result['message'])
+                else:
+                    st.sidebar.error(result['message'])
+            except Exception as e:
+                st.sidebar.error(f"Connection failed: {str(e)}")
+        
+        # Save API key option
+        if api_key and st.sidebar.checkbox("Save API key locally", key="save_gemini_key"):
+            config_path = os.path.join(os.getcwd(), ".gemini_config.json")
+            try:
+                with open(config_path, 'w') as f:
+                    json.dump({"api_key": api_key}, f)
+                st.sidebar.success("API key saved to .gemini_config.json")
+            except Exception as e:
+                st.sidebar.error(f"Failed to save: {str(e)}")
+        
+        # Load saved API key
+        if not api_key:
+            config_path = os.path.join(os.getcwd(), ".gemini_config.json")
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path, 'r') as f:
+                        config = json.load(f)
+                        if 'api_key' in config:
+                            st.session_state['gemini_api_key'] = config['api_key']
+                            st.sidebar.info("Loaded saved API key")
+                except:
+                    pass
     
     where_parts = []
     params = []

@@ -2,6 +2,7 @@ import re
 import duckdb
 import pandas as pd
 import json
+import os
 from .indexing import get_connection, safe_execute
 
 try:
@@ -50,15 +51,29 @@ class CorpusParser:
         corpus_name = os.path.splitext(os.path.basename(filepath))[0]
         self.process_file(filepath, corpus_name)
 
-    def process_file(self, filepath, corpus_name):
+    def process_file(self, filepath, corpus_name, lang_code=None):
         conn, is_shared = get_connection(allow_fallback=False)
         try:
-            # Sanity Check: If file looks like a JSON dictionary, warn
+            # 1. Detect Format
+            is_vertical = True
             with open(filepath, 'r', encoding='utf-8', errors='replace') as test_f:
-                head = test_f.read(100).strip()
-                if head.startswith('{') or head.startswith('['):
-                    print("WARNING: This file looks like JSON. Are you sure it's a corpus file (vertical text)?")
+                # Check first few non-empty lines for tabs
+                lines_checked = 0
+                for line in test_f:
+                    if line.strip():
+                        if '\t' not in line and not (line.strip().startswith('<') and line.strip().endswith('>')):
+                            # Found a line that is NOT a tag and has NO tabs -> likely raw text
+                            is_vertical = False
+                            break
+                        lines_checked += 1
+                        if lines_checked > 10: break
+            
+            if not is_vertical:
+                print(f"Detected RAW text for {filepath}. Processing with Stanza (Language: {lang_code})...")
+                self.process_raw_text(filepath, corpus_name, lang_code, conn)
+                return
 
+            # --- EXISTING VERTICAL PROCESSING ---
             # Drop indexes to speed up DELETE and INSERT
             drop_indexes(conn)
 
@@ -67,20 +82,26 @@ class CorpusParser:
             safe_execute(conn, "DELETE FROM tokens WHERE corpus = ?", (corpus_name,))
             
             # Get current max ID to continue sequence
+            # Get current max ID to continue sequence
             try:
                  res = safe_execute(conn, "SELECT MAX(id) FROM tokens").fetchone()
                  current_id = res[0] if res[0] is not None else 0
             except:
                 current_id = 0
 
-            current_metadata = {}
+            # --- ROOT TAG INJECTION ---
+            # <root attribute="filename">
+            # We treat this as initial metadata that applies to the whole file
+            root_attr_value = os.path.splitext(os.path.basename(filepath))[0]
+            current_metadata = {"attribute": root_attr_value}
+            
             current_sentence_id = 0
             current_doc_id = 0
             current_sentence_num = 0
             batch_data = []
             batch_size = 50000
             
-            print(f"Processing {filepath}...")
+            print(f"Processing {filepath} (Vertical)...")
             
             with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
                 for line in f:
@@ -128,6 +149,171 @@ class CorpusParser:
         finally:
             if not is_shared:
                 conn.close()
+
+    def process_raw_text(self, filepath, corpus_name, lang_code, conn):
+        import stanza
+        import os
+        
+        # Stanza Setup
+        stanza_lang = 'en' # Default
+        if lang_code:
+            lang_map = {
+                'English': 'en', 'Indonesian': 'id', 'Chinese': 'zh', 
+                'Japanese': 'ja', 'Korean': 'ko', 'Arabic': 'ar'
+            }
+            stanza_lang = lang_map.get(lang_code, 'other')
+        
+        nlp = None
+        if stanza_lang != 'other':
+            try:
+                # Check if model exists, if not download
+                stanza.download(stanza_lang, processors='tokenize,pos,lemma')
+                nlp = stanza.Pipeline(stanza_lang, processors='tokenize,pos,lemma', use_gpu=False, verbose=False)
+            except Exception as e:
+                print(f"Failed to load Stanza for {stanza_lang}: {e}. Falling back to whitespace.")
+                nlp = None
+
+        # Drop indexes
+        drop_indexes(conn)
+        
+        # Clear existing
+        print(f"Clearing existing data for corpus '{corpus_name}'...")
+        safe_execute(conn, "DELETE FROM tokens WHERE corpus = ?", (corpus_name,))
+        
+        try:
+             res = safe_execute(conn, "SELECT MAX(id) FROM tokens").fetchone()
+             current_id = res[0] if res[0] is not None else 0
+        except:
+            current_id = 0
+
+        # --- ROOT TAG INJECTION ---
+        root_attr_value = os.path.splitext(os.path.basename(filepath))[0]
+        current_metadata = {"attribute": root_attr_value}
+        
+        current_sentence_id = 0
+        current_doc_id = 0
+        current_sentence_num = 0
+        batch_data = []
+        batch_size = 50000
+
+        with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+
+        # Split by XML tags
+        # Captures tags like <...> as separate items in the list due to parens in split regex
+        parts = re.split(r'(<[^>]+>)', content)
+        
+        for part in parts:
+            if not part: continue
+            
+            # Check if it is a tag
+            if part.startswith('<') and part.endswith('>'):
+                # Handle Metadata / Tag
+                # Requirement: Indent tag hard left (remove whitespace around it, keep internal structure)
+                clean_tag = part.strip() 
+                
+                # Check if it's a structural tag we track (like <s>, <doc>)
+                # Use existing parse_line logic for metadata extraction
+                type_, data = self.parse_line(clean_tag)
+                if type_ == 'metadata':
+                    tag_name, attrs = data
+                    if tag_name == 's' or tag_name == 'sentence':
+                            current_sentence_id += 1
+                    elif tag_name.startswith('doc'):
+                            current_doc_id += 1
+                    # Merge metadata (simple approach: update current state)
+                    current_metadata.update(attrs)
+                    
+                # NOTE: In our DB structure, tags aren't stored as rows unless they are tokens.
+                # The user requirement "indent tag hard left" suggests they care about the *XML output* 
+                # later or how it's treated. For Ingestion, we just consume it as metadata.
+                # If the user means "treat as a token but untokenized", that's different.
+                # Assuming standard behavior: Tags -> Metadata state updates.
+                continue
+            
+            # Process Text Content
+            text_segment = part.strip()
+            if not text_segment: continue
+            
+            # SENTENCE SPLITTING FIRST (before tokenization)
+            # Use user's regex pattern: /.*?[\.\!\?](?=\s|\n|$)/s
+            # Python equivalent with DOTALL flag
+            sentence_pattern = r'.*?[\.\!\?](?=\s|\n|$)'
+            sentences = re.findall(sentence_pattern, text_segment, re.DOTALL)
+            
+            # If no sentences found (no punctuation), treat whole segment as one sentence
+            if not sentences:
+                sentences = [text_segment]
+            
+            # Process each sentence
+            for sentence_text in sentences:
+                sentence_text = sentence_text.strip()
+                if not sentence_text: continue
+                
+                # Increment sentence counters
+                current_sentence_id += 1
+                current_sentence_num += 1
+                
+                tokens_to_add = []
+                
+                if nlp:
+                    # Stanza Processing (per sentence)
+                    try:
+                        doc = nlp(sentence_text)
+                        # Stanza may further split, but we already have sentence boundaries
+                        for stanza_sent in doc.sentences:
+                            for word in stanza_sent.words:
+                                tokens_to_add.append({
+                                    'token': word.text,
+                                    'tag': word.upos,
+                                    'lemma': word.lemma if word.lemma else word.text
+                                })
+                    except Exception as e:
+                        print(f"Stanza processing failed: {e}. Using fallback.")
+                        # Fallback to whitespace
+                        words = sentence_text.split()
+                        for w in words:
+                            tokens_to_add.append({
+                                'token': w,
+                                'tag': 'UNK',
+                                'lemma': w
+                            })
+                else:
+                    # Whitespace Fallback
+                    words = sentence_text.split()
+                    for w in words:
+                        tokens_to_add.append({
+                            'token': w,
+                            'tag': 'UNK',
+                            'lemma': w
+                        })
+                
+                # Add to Batch
+                for t in tokens_to_add:
+                    current_id += 1
+                    row = {
+                        'id': current_id,
+                        'token': t['token'],
+                        'tag': t['tag'],
+                        'lemma': t['lemma'],
+                        'corpus': corpus_name,
+                        'metadata': json.dumps(current_metadata),
+                        'file_id': filepath,
+                        'sentence_id': current_sentence_id,
+                        'doc_id': current_doc_id,
+                        'sentence_num': current_sentence_num
+                    }
+                    batch_data.append(row)
+                    if len(batch_data) >= batch_size:
+                        self._bulk_insert(conn, batch_data)
+                        batch_data = []
+
+        if batch_data:
+            self._bulk_insert(conn, batch_data)
+        
+        print(f"Recreating indexes for corpus '{corpus_name}'...")
+        add_indexes(conn)
+        print(f"Finished processing RAW {filepath}. Total tokens: {current_id}")
 
     def _bulk_insert(self, conn, data):
         if not data: return

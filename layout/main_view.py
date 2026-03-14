@@ -9,6 +9,7 @@ from stats import frequency, collocation, kwic
 from wordlist import manager
 from layout import components
 from pipeline.overrides_io import save_overrides
+from utils.ai_helper import get_ai_helper
 
 def parse_manual_list(text, delimiter="|"):
     """Parses text area input into a list of dicts/tuples."""
@@ -46,23 +47,78 @@ def render_ngram_badges(ngrams, key_prefix="ngram"):
         freq = row[1]
         st.button(f"{text} ({freq})", key=f"{key_prefix}_{i}_{text}", use_container_width=True, on_click=cb_search_token, args=(text,))
 
-def render_sense_editor(token, tag, initial_data):
+def render_sense_editor(token, tag, initial_data, where_clause="1=1", params=()):
     """
     Renders a form to edit sense fields.
     initial_data: dict with definition, pronunciation, frequency, etc.
     """
     with st.expander(f"📝 Edit Sense ({tag})", expanded=False):
-        new_pron = st.text_input("Pronunciation", value=initial_data.get('pronunciation', ''), key=f"edit_pron_{token}_{tag}")
+        ai_helper = get_ai_helper(st.session_state)
+        
+        if not ai_helper:
+            st.info("💡 **AI Assistant**: Enable AI in the sidebar to automatically generate content.")
+            
+        def render_ai_field(label, value, field_key, ai_method_name, is_area=False, placeholder="", extra_args=None):
+            if extra_args is None: extra_args = {}
+            
+            # Use session state as the source of truth if it exists, otherwise use value
+            current_val = st.session_state.get(field_key, value)
+            
+            if ai_helper and ai_method_name:
+                col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
+            else:
+                col1, col2 = st.columns([1, 0.01]) # Dummy
+                
+            with col1:
+                if is_area:
+                    result = st.text_area(label, value=current_val, placeholder=placeholder, key=field_key)
+                else:
+                    result = st.text_input(label, value=current_val, placeholder=placeholder, key=field_key)
+            
+            if ai_helper and ai_method_name:
+                with col2:
+                    if st.button("✨", key=f"btn_{field_key}", use_container_width=True, help=f"Generate {label.lower()}"):
+                        with st.spinner("..."):
+                            try:
+                                if ai_method_name == "generate_definition":
+                                    context_examples = kwic.get_kwic_lines(token, window=5, limit=5, where_clause=where_clause, params=params, pos_tag=tag)
+                                    suggestion = ai_helper.generate_definition(token, tag, context_examples)
+                                else:
+                                    method = getattr(ai_helper, ai_method_name)
+                                    suggestion = method(token, tag, **extra_args)
+                                st.session_state[f"ai_sugg_{field_key}"] = suggestion
+                            except Exception as e:
+                                st.error(str(e))
+                                
+            # Show suggestion if exists
+            sugg_key = f"ai_sugg_{field_key}"
+            if sugg_key in st.session_state and st.session_state[sugg_key]:
+                sugg = st.session_state[sugg_key]
+                st.info(f"**Suggestion:**\n{sugg}")
+                col_a, col_b = st.columns([1, 5])
+                with col_a:
+                    if st.button("✅ Apply", key=f"apply_{field_key}"):
+                        st.session_state[field_key] = sugg
+                        del st.session_state[sugg_key]
+                        st.rerun()
+                with col_b:
+                    if st.button("❌ Dismiss", key=f"dimiss_{field_key}"):
+                        del st.session_state[sugg_key]
+                        st.rerun()
+                        
+            return result
+
+        new_pron = render_ai_field("Pronunciation", initial_data.get('pronunciation', ''), f"edit_pron_{token}_{tag}", "generate_pronunciation")
         new_freq = st.number_input("Frequency", value=int(initial_data.get('frequency', 0)), key=f"edit_freq_{token}_{tag}")
-        new_def = st.text_area("Definition", value=initial_data.get('definition', ''), key=f"edit_def_{token}_{tag}")
+        new_def = render_ai_field("Definition", initial_data.get('definition', ''), f"edit_def_{token}_{tag}", "generate_definition", is_area=True)
         
         st.write("---")
         st.caption("Manual Statistics & Examples (Format: 'Item | Value')")
-        m_bigrams = st.text_area("Bigrams (manual)", value=initial_data.get('manual_bigrams', ''), placeholder="node word | 10\nword node | 5", key=f"edit_bi_{token}_{tag}")
-        m_trigrams = st.text_area("Trigrams (manual)", value=initial_data.get('manual_trigrams', ''), placeholder="node w1 w2 | 3", key=f"edit_tri_{token}_{tag}")
-        m_collocs = st.text_area("Collocates (manual)", value=initial_data.get('manual_collocates', ''), placeholder="word | score", key=f"edit_coll_list_{token}_{tag}")
-        m_examples = st.text_area("KWIC Examples (manual)", value=initial_data.get('manual_examples', ''), placeholder="left | node | right", key=f"edit_ex_{token}_{tag}")
-        m_collo_ex = st.text_area("Collocate Examples (manual)", value=initial_data.get('manual_collo_ex', ''), placeholder="collocate | left | node | right", key=f"edit_collo_ex_{token}_{tag}")
+        m_bigrams = render_ai_field("Bigrams (manual)", initial_data.get('manual_bigrams', ''), f"edit_bi_{token}_{tag}", "generate_ngrams", is_area=True, placeholder="node word | 10\nword node | 5", extra_args={"n_type": "Bigrams"})
+        m_trigrams = render_ai_field("Trigrams (manual)", initial_data.get('manual_trigrams', ''), f"edit_tri_{token}_{tag}", "generate_ngrams", is_area=True, placeholder="node w1 w2 | 3", extra_args={"n_type": "Trigrams"})
+        m_collocs = render_ai_field("Collocates (manual)", initial_data.get('manual_collocates', ''), f"edit_coll_list_{token}_{tag}", "generate_formatted_collocates", is_area=True, placeholder="word | score")
+        m_examples = render_ai_field("KWIC Examples (manual)", initial_data.get('manual_examples', ''), f"edit_ex_{token}_{tag}", "generate_kwic_examples", is_area=True, placeholder="left | node | right")
+        m_collo_ex = render_ai_field("Collocate Examples (manual)", initial_data.get('manual_collo_ex', ''), f"edit_collo_ex_{token}_{tag}", "generate_collocate_examples", is_area=True, placeholder="collocate | left | node | right")
 
         if st.button("Save Changes", key=f"save_{token}_{tag}"):
             if token not in st.session_state['overrides']:
@@ -569,8 +625,8 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                 override = query_overrides.get(tag, {})
                 
                 # 1. Definition
-                def_key = f"def_{query}_{tag}"
-                curr_def = override.get('definition') or st.session_state.get(def_key, "")
+                def_edit_key = f"edit_def_{query}_{tag}"
+                curr_def = st.session_state.get(def_edit_key) or override.get('definition', "")
                 
                 # Header - Professional Style
                 # Get language setting
@@ -630,10 +686,8 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                     # Indonesian pronunciation (could add Indonesian audio links if desired)
                     pron_links_html = "<span style=\"font-size: 18px; color: #666;\">🇮🇩</span>"
                 
-                # Build wordlist badges (only for English)
-                wl_badges = []
-                if language == 'English':
-                    wl_badges = manager.check_token(query, lemma=lemma)
+                # Build wordlist badges (for all languages now)
+                wl_badges = manager.check_token(query, lemma=lemma)
                 
                 # Get PMW range for relative percentage calculation
                 pmw_range = cache.get_pmw_range(corpus_hash, where_clause, params)
@@ -690,10 +744,11 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                 badges_list = []
                 # POS tag badge
                 badges_list.append(f"<span style=\"background:#1976d2; color:#ffffff; padding:4px 10px; border-radius:4px; font-size:24px; margin-right:6px; font-weight:bold;\">{tag}</span>")
-                # Wordlist badges (only for English)
+                # Wordlist badges (for all languages)
                 if wl_badges:
                     for b in wl_badges:
-                        badges_list.append(f"<span style=\"background:#e0f2f1; color:#00695c; padding:4px 10px; border-radius:4px; font-size:24px; margin-right:6px;\">{b['name']} {b['value']}</span>")
+                        val_str = f" {b['value']}" if b['value'] else ""
+                        badges_list.append(f"<span style=\"background:#e0f2f1; color:#00695c; padding:4px 10px; border-radius:4px; font-size:24px; margin-right:6px;\">{b['name']}{val_str}</span>")
                 
                 badges_html = " ".join(badges_list)
                 
@@ -746,14 +801,14 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                 # Form to Edit
                 render_sense_editor(query, tag, {
                     "definition": curr_def,
-                    "pronunciation": pron,
-                    "frequency": freq,
-                    "manual_bigrams": override.get('manual_bigrams', ''),
-                    "manual_trigrams": override.get('manual_trigrams', ''),
-                    "manual_collocates": override.get('manual_collocates', ''),
-                    "manual_examples": override.get('manual_examples', ''),
-                    "manual_collo_ex": override.get('manual_collo_ex', '')
-                })
+                    "pronunciation": st.session_state.get(f"edit_pron_{query}_{tag}") or pron,
+                    "frequency": st.session_state.get(f"edit_freq_{query}_{tag}") or freq,
+                    "manual_bigrams": st.session_state.get(f"edit_bi_{query}_{tag}") or override.get('manual_bigrams', ''),
+                    "manual_trigrams": st.session_state.get(f"edit_tri_{query}_{tag}") or override.get('manual_trigrams', ''),
+                    "manual_collocates": st.session_state.get(f"edit_coll_list_{query}_{tag}") or override.get('manual_collocates', ''),
+                    "manual_examples": st.session_state.get(f"edit_ex_{query}_{tag}") or override.get('manual_examples', ''),
+                    "manual_collo_ex": st.session_state.get(f"edit_collo_ex_{query}_{tag}") or override.get('manual_collo_ex', '')
+                }, where_clause=where_clause, params=params)
                 
 
                 

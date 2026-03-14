@@ -110,6 +110,18 @@ def load_wordlists():
                         elif row:
                             entries[row[0].strip().lower()] = "Yes"
                  loaded['BASIC'] = entries
+                 
+            # 5. User-Defined Wordlists (TXT)
+            elif fname_lower.endswith(".txt"):
+                entries = {}
+                list_name = f"USER-DEFINED: {os.path.splitext(filename)[0].upper()}"
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        clean_word = line.strip().lower()
+                        if clean_word:
+                            # Empty string for value so it renders cleanly
+                            entries[clean_word] = ""
+                loaded[list_name] = entries
 
         except Exception as e:
             print(f"Error loading {filename}: {e}")
@@ -144,7 +156,7 @@ def check_token(token, lemma=None):
         elif l_lower and l_lower in data:
             found_val = data[l_lower]
             
-        if found_val:
+        if found_val is not None:
             badges.append({'name': list_name, 'value': found_val})
             
     # Check CEFR (Library)

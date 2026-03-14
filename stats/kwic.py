@@ -52,6 +52,10 @@ def get_kwic_lines(token, window=7, limit=50, where_clause="1=1", params=(), pos
         node = ""
         right = []
         
+        # Add start tag if full sentence
+        if sent_id and sent_id > 0:
+            left.insert(0, "&lt;s&gt;")
+
         for t, tid in window_tokens:
             if tid == match_id:
                 node = t
@@ -59,6 +63,10 @@ def get_kwic_lines(token, window=7, limit=50, where_clause="1=1", params=(), pos
                 left.append(t)
             elif tid > match_id:
                 right.append(t)
+        
+        # Add end tag if full sentence
+        if sent_id and sent_id > 0:
+            right.append("&lt;/s&gt;")
                 
         results.append({
             'left': " ".join(left),
@@ -157,6 +165,9 @@ def get_phrase_kwic_lines(phrase, window=7, limit=50, where_clause="1=1", params
             """, (file_id, win_start, win_end)).fetchall()
         
         left, node, right = [], [], []
+        if sent_id and sent_id > 0:
+            left.append("&lt;s&gt;")
+
         for t, tid in tokens:
             if tid < seq_start:
                 left.append(t)
@@ -164,6 +175,9 @@ def get_phrase_kwic_lines(phrase, window=7, limit=50, where_clause="1=1", params
                 right.append(t)
             else:
                 node.append(t)
+        
+        if sent_id and sent_id > 0:
+            right.append("&lt;/s&gt;")
         
         results.append({
             'left': " ".join(left),
@@ -226,6 +240,9 @@ def get_collocate_kwic(token, collocate, window=7, limit=5, where_clause="1=1", 
         node = ""
         right = []
         
+        if sent_id and sent_id > 0:
+            left.append("&lt;s&gt;")
+
         for tid, t in tokens:
             if tid == match_id:
                 node = t
@@ -233,6 +250,9 @@ def get_collocate_kwic(token, collocate, window=7, limit=5, where_clause="1=1", 
                 left.append(t)
             elif tid > match_id:
                 right.append(t)
+        
+        if sent_id and sent_id > 0:
+            right.append("&lt;/s&gt;")
                 
         results.append({
             'left': left,
@@ -337,6 +357,10 @@ def get_phrase_collocate_kwic(phrase, collocate, window=7, limit=5, where_clause
             """, (file_id, win_start, win_end)).fetchall()
         
         left, node, right = [], [], []
+        
+        if sent_id and sent_id > 0:
+            left.append("&lt;s&gt;")
+
         for tid, t in tokens:
             if tid < seq_start:
                 left.append(t)
@@ -344,6 +368,9 @@ def get_phrase_collocate_kwic(phrase, collocate, window=7, limit=5, where_clause
                 right.append(t)
             else:
                 node.append(t)
+        
+        if sent_id and sent_id > 0:
+            right.append("&lt;/s&gt;")
                 
         results.append({
             'left': left,

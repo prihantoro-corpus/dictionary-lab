@@ -6,3 +6,15 @@ __pycache__/
 
 *.wal
 *.log
+
+corpora/
+personal_overrides.json
+venv/
+.venv/
+test_*.txt
+*.xlsx
+chemistry.txt
+linguistics.txt
+test_raw_ingest.txt
+test_raw_sentence.txt
+test_root_tag.txt
