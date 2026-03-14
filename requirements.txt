@@ -1,6 +1,6 @@
 streamlit
-duckdb
-pandas
+# *.duckdb
+# *.db
 openpyxl
 xlsxwriter
 matplotlib
@@ -8,3 +8,5 @@ scikit-learn
 cefrpy
 eng-to-ipa
 python-Levenshtein
+google-generativeai
+requests

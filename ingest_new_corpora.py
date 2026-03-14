@@ -1,7 +1,7 @@
 from pipeline import ingest, indexing
 import os
 
-CORPORA_DIR = r"c:\Users\priha\Documents\dictionary-lab\corpora"
+CORPORA_DIR = "corpora"
 
 def run():
     parser = ingest.CorpusParser()

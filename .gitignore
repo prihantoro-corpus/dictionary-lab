@@ -1,10 +1,10 @@
 __pycache__/
 *.pyc
-*.duckdb
-*.db
+# *.duckdb
+# *.db
 .env
 
-*.wal
+# *.wal
 *.log
 
 corpora/
