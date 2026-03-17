@@ -237,6 +237,33 @@ Switch to this tab via the top navigation radio button.
 
 ---
 
+---
+
+### Vocabulary Profiler Tab
+Access this tab to analyze how much of your corpus is covered by specific wordlists (e.g., NGSL, CEFR).
+
+#### 🎯 Interactive Selection
+The profiler is interactive by default.
+1. **Choose Wordlists**: Use the multiselect dropdown at the top to pick wordlists you want to see detailed results for.
+2. **Dynamic Rendering**: Charts and tables will appear only for the selected wordlists, keeping your view focused.
+3. **Change Anytime**: You can add or remove wordlists from the selection at any time to update the current view.
+
+#### 📊 Visual & Tabular Reports
+Each selected wordlist produces:
+- **Table 1 (Summary)**: Total unique lemmas, covered count, and coverage percentage.
+- **Visual 1 (Pie Chart)**: 3D-styled visual of Covered vs. Not Covered vocabulary.
+- **Table 2 (Breakdown)**: Distribution across categories (e.g., NGSL Rank 1 vs. Rank 2). This table is limited to the top 50 rows for performance.
+- **Visual 2 (3D Bars)**: Isometric 3D bar chart showing category distribution.
+
+#### 📥 Hierarchical Excel Export
+The "Download Comprehensive Excel Report" button provides full data visibility:
+- **Aggregate Summary**: Overall metrics for all wordlists.
+- **By Corpus**: Separate coverage stats for each corpus in your current selection.
+- **By File**: Detailed metrics for every individual text file uploaded.
+- **Full Breakdowns**: Complete category lists (not limited to 50 lines).
+
+---
+
 ## 5. Editing & Dictionary Creation
 
 You can turn the corpus tool into a dictionary editor.

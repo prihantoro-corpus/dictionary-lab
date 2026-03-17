@@ -18,6 +18,7 @@ CORTEX Dictionary Lab is a stream-processing web application built with **Stream
 - **Collocate Analysis**: Log-Likelihood scoring with network visualization
 - **KWIC Display**: Sentence-level examples with `<s>` tag markers
 - **Parallel Corpus**: Aligned bilingual text support
+- **Vocabulary Profiler**: Coverage analysis across multiple wordlists (GSL, AWL, CEFR) with 3D visualizations and hierarchical Excel reports.
 
 ### Dictionary Editing
 - **Entry Management**: Create and edit dictionary entries
@@ -36,7 +37,7 @@ CORTEX Dictionary Lab is a stream-processing web application built with **Stream
 - **Data Processing**: Pandas, NumPy
 - **NLP**: Stanza (multi-language), `eng_to_ipa`, custom implementations
 - **AI Integration**: `google-generativeai` (Gemini), `requests` (Ollama) via `utils/ai_helper.py`
-- **Visualization**: Matplotlib (network graphs, frequency bands)
+- **Visualization**: Matplotlib (network graphs, frequency bands, 3D profiler charts via `mpl_toolkits.mplot3d`)
 
 ---
 
@@ -57,6 +58,7 @@ Handles data ingestion and database management.
   - **Root Tag Injection**: Adds `<root attribute="filename">` for file-based filtering
   - **Stanza Processing**: Language-specific NLP pipeline
 - **`indexing.py`**: Database connection management (`get_connection()`). Handles `duckdb` connections and cursor safety.
+- **`profiler.py`**: Core logic for vocabulary coverage analysis. Calculates distribution across wordlists at aggregate, corpus, and file levels.
 - **`search.py`**: High-level search interface used by the UI to query the database.
 - **`cache_manager.py`**: Intermediary layer for caching expensive queries (N-grams, collocates) using `st.cache_data`.
 - **`overrides_io.py`**: Handling read/write operations for the user's `personal_overrides.json`.
@@ -235,7 +237,10 @@ sentences = re.findall(sentence_pattern, text, re.DOTALL)
 # - Distance inversely proportional to LL score
 # - Bubble size proportional to score
 # - Left/Right positioning based on directional frequency
-# - POS-based color coding
+# - **Color = POS**: Visual POS tag distinction
+- **3D Projections**: The Vocabulary Profiler uses `mpl_toolkits.mplot3d` to render isometric 3D bar charts for category distribution and shadowed pie charts for coverage.
+```python
+# projection='3d' with ax.bar3d for isometric bars
 ```
 
 ### Parallel Corpus Alignment

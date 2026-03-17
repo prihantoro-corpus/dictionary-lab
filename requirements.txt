@@ -1,4 +1,5 @@
 streamlit
+pandas
 duckdb
 stanza
 openpyxl
@@ -10,3 +11,4 @@ eng-to-ipa
 python-Levenshtein
 google-generativeai
 requests
+numpy

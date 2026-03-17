@@ -53,7 +53,14 @@ N-grams are extracted using raw frequency counts of adjacent tokens.
 - **Bigrams**: $P(w_n | w_{n-1})$ implies looking for the most frequent word following the node.
 - **Trigrams**: Extended to windows of 3.
 
-## 4. Multi-word Phrases
-For a phrase $P = w_1 w_2$, statistics are calculated by treating $P$ as a single unit.
-- **Frequency**: Count of the sequence $w_1$ followed immediately by $w_2$.
-- **Collocates**: Using $P$ as the node, determining association with surrounding words outside the phrase boundary.
+## 5. Vocabulary Profiling
+
+### Coverage Percentage
+Measures how much of the unique corpus vocabulary (lemmas) is present in a specific wordlist (e.g., NGSL, AWL).
+$$ \text{Coverage \%} = \left( \frac{\text{Unique Lemmas in Wordlist}}{\text{Total Unique Lemmas in Corpus}} \right) \times 100 $$
+
+### Category Distribution (Breakdown)
+For wordlists with internal categories (like NGSL Ranks 1-3 or CEFR Levels A1-C2), the profiler calculates the percentage of the *entire* corpus that falls into each category.
+$$ \text{Category \%} = \left( \frac{\text{Lemmas in Category } X}{\text{Total Unique Lemmas in Corpus}} \right) \times 100 $$
+
+*Note*: The profiler operates on **lemmas** to ensure that inflected forms (e.g., "walking", "walked") are mapped to their root ("walk") before wordlist comparison.

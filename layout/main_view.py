@@ -4,12 +4,13 @@ import pandas as pd
 import eng_to_ipa as ipa
 from utils import indo_g2p
 import json
-from pipeline import search, cache_manager as cache
+from pipeline import search, cache_manager as cache, profiler
 from stats import frequency, collocation, kwic
 from wordlist import manager
 from layout import components
 from pipeline.overrides_io import save_overrides
 from utils.ai_helper import get_ai_helper
+import matplotlib.pyplot as plt
 
 def parse_manual_list(text, delimiter="|"):
     """Parses text area input into a list of dicts/tuples."""
@@ -175,12 +176,183 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
 
     # Navigation Tabs
     # We use a radio button styled as tabs or just simple toggle
-    nav = st.radio("Navigation", ["Search", "Corpus Statistic"], horizontal=True, label_visibility="collapsed", key="main_nav")
+    nav = st.radio("Navigation", ["Search", "Corpus Statistic", "Vocabulary Profiler"], horizontal=True, label_visibility="collapsed", key="main_nav")
     
     if nav == "Corpus Statistic":
         render_entry_tab(where_clause, params)
+    elif nav == "Vocabulary Profiler":
+        render_profiler_tab(where_clause, params)
     else:
         render_search_tab(where_clause, params, stop_words, collocate_filter, skip_punct)
+
+def render_profiler_tab(where_clause, params):
+    st.title("📊 Vocabulary Profiler")
+    st.info("Analyzes the coverage of your current corpus against known and uploaded wordlists.")
+    
+    with st.spinner("Calculating profile..."):
+        all_profiles = profiler.get_vocabulary_profile(where_clause, params)
+        
+    if not all_profiles or not all_profiles['Aggregate']:
+        st.warning("No data found to profile. Please ensure you have loaded a corpus and selected it in the sidebar.")
+        return
+        
+    # Download Button at Top
+    import io
+    def generate_excel(data):
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            # Sheet 1: Aggregate Summary
+            agg_rows = []
+            agg_br_rows = []
+            for list_name, ldata in data['Aggregate'].items():
+                agg_rows.append({
+                    "Wordlist": list_name,
+                    "Total Corpus Lemmas": ldata['total_corpus_unique'],
+                    "Covered": ldata['covered_count'],
+                    "Coverage %": f"{ldata['coverage_pct']:.2f}%"
+                })
+                for cat, count in ldata['breakdown'].items():
+                    agg_br_rows.append({
+                        "Wordlist": list_name,
+                        "Category": cat,
+                        "Count": count,
+                        "Corpus %": f"{(count / ldata['total_corpus_unique'] * 100):.2f}%" if ldata['total_corpus_unique'] > 0 else "0%"
+                    })
+            
+            pd.DataFrame(agg_rows).to_excel(writer, sheet_name="Aggregate Summary", index=False)
+            pd.DataFrame(agg_br_rows).to_excel(writer, sheet_name="Aggregate Breakdown", index=False)
+            
+            # Sheet 2: By Corpus
+            corp_rows = []
+            for cname, cdata in data['By Corpus'].items():
+                for list_name, ldata in cdata.items():
+                    corp_rows.append({
+                        "Corpus": cname,
+                        "Wordlist": list_name,
+                        "Total Lemmas": ldata['total_corpus_unique'],
+                        "Covered": ldata['covered_count'],
+                        "Coverage %": f"{ldata['coverage_pct']:.2f}%"
+                    })
+            pd.DataFrame(corp_rows).to_excel(writer, sheet_name="By Corpus", index=False)
+            
+            # Sheet 3: By File
+            file_rows = []
+            for fname, fdata in data['By File'].items():
+                for list_name, ldata in fdata.items():
+                    file_rows.append({
+                        "File": fname,
+                        "Wordlist": list_name,
+                        "Total Lemmas": ldata['total_corpus_unique'],
+                        "Covered": ldata['covered_count'],
+                        "Coverage %": f"{ldata['coverage_pct']:.2f}%"
+                    })
+            pd.DataFrame(file_rows).to_excel(writer, sheet_name="By File", index=False)
+            
+        return output.getvalue()
+
+    excel_data = generate_excel(all_profiles)
+    st.download_button(
+        label="📥 Download Comprehensive Excel Report (All Wordlists)",
+        data=excel_data,
+        file_name="vocabulary_profile_report.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
+    )
+
+    # Wordlist Selection UI
+    profiles = all_profiles['Aggregate']
+    available_lists = sorted(list(profiles.keys()))
+    
+    st.divider()
+    selected_lists = st.multiselect(
+        "🎯 Select wordlists to display detailed results:",
+        options=available_lists,
+        default=[],
+        help="Choose one or more wordlists to see their coverage tables and charts below. The Excel download above always contains all data."
+    )
+
+    if not selected_lists:
+        st.info("Pick a wordlist above to view its detailed profile.")
+        return
+
+    # UI Rendering (Selected Only)
+    for list_name in selected_lists:
+        data = profiles[list_name]
+        st.divider()
+        st.subheader(f"📋 Wordlist: {list_name}")
+        
+        # Determine layout
+        breakdown = data['breakdown']
+        has_categories = len(breakdown) > 0 and not (len(breakdown) == 1 and ("Generic" in breakdown or "" in breakdown))
+        
+        if has_categories:
+            # 4 columns: [Table 1, Visual 1, Table 2, Visual 2]
+            c1, c2, c3, c4 = st.columns([1.5, 0.7, 1.5, 0.7])
+            
+            with c1:
+                st.markdown("#### Table 1: Summary")
+                summary_df = pd.DataFrame([
+                    {"Metric": "Unique Lemmas", "Value": data['total_corpus_unique']},
+                    {"Metric": "Covered", "Value": data['covered_count']},
+                    {"Metric": "Not Covered", "Value": data['not_covered_count']},
+                    {"Metric": "Coverage %", "Value": f"{data['coverage_pct']:.1f}%"}
+                ])
+                st.table(summary_df)
+                
+            with c2:
+                st.markdown("#### Visual 1")
+                fig1, ax1 = plt.subplots(figsize=(2, 2))
+                ax1.pie([data['covered_count'], data['not_covered_count']], 
+                       labels=['C', 'NC'], autopct='%1.0f%%', startangle=90, 
+                       colors=['#4CAF50', '#FF5252'], shadow=True, explode=(0.1, 0),
+                       textprops={'fontsize': 8})
+                ax1.axis('equal')
+                st.pyplot(fig1, use_container_width=False)
+                
+            with c3:
+                st.markdown("#### Table 2: Category (Top 50)")
+                sorted_cats = sorted(breakdown.keys())
+                breakdown_data = [{"Cat": c, "Count": breakdown[c], "%": f"{(breakdown[c]/data['total_corpus_unique']*100):.1f}%"} for c in sorted_cats]
+                breakdown_df = pd.DataFrame(breakdown_data)
+                st.table(breakdown_df.head(50))
+                if len(breakdown_df) > 50:
+                    st.caption(f"Showing 50 of {len(breakdown_df)}")
+                    
+            with c4:
+                st.markdown("#### Visual 2")
+                from mpl_toolkits.mplot3d import Axes3D
+                import numpy as np
+                plot_df = breakdown_df.head(15)
+                fig2 = plt.figure(figsize=(2, 2))
+                ax2 = fig2.add_subplot(111, projection='3d')
+                x_pos = np.arange(len(plot_df))
+                ax2.bar3d(x_pos, np.zeros(len(plot_df)), np.zeros(len(plot_df)), 0.5, 0.5, plot_df['Count'], color='#2196F3', alpha=0.8)
+                ax2.set_xticks(x_pos)
+                ax2.set_xticklabels(plot_df['Cat'], rotation=45, ha='right', fontsize=6)
+                ax2.set_yticks([])
+                ax2.set_zlabel('Count', fontsize=6)
+                st.pyplot(fig2, use_container_width=False)
+                
+        else:
+            # 2 columns only
+            c1, c2 = st.columns([3, 1])
+            with c1:
+                st.markdown("#### Table 1: Coverage Summary")
+                summary_df = pd.DataFrame([
+                    {"Metric": "Corpus Unique Lemmas", "Value": data['total_corpus_unique']},
+                    {"Metric": "Lemmas in Wordlist", "Value": data['covered_count']},
+                    {"Metric": "Lemmas NOT in Wordlist", "Value": data['not_covered_count']},
+                    {"Metric": "Coverage (%)", "Value": f"{data['coverage_pct']:.2f}%"}
+                ])
+                st.table(summary_df)
+            with c2:
+                st.markdown("#### Visual 1: Pie Chart")
+                fig1, ax1 = plt.subplots(figsize=(2.5, 2.5))
+                ax1.pie([data['covered_count'], data['not_covered_count']], labels=['Covered', 'Not Covered'], 
+                       autopct='%1.1f%%', startangle=90, colors=['#4CAF50', '#FF5252'], shadow=True, explode=(0.05, 0))
+                ax1.axis('equal')
+                st.pyplot(fig1, use_container_width=False)
+
 
 def render_entry_tab(where_clause, params):
     st.title("Corpus Statistic")
@@ -204,6 +376,7 @@ def render_entry_tab(where_clause, params):
         st.markdown(badges_html, unsafe_allow_html=True)
     else:
         st.write("No POS tags found.")
+
     
         
     st.divider()
