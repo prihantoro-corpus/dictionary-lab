@@ -379,8 +379,17 @@ def render():
             val_files = [f for f in os.listdir("wordlist") if f.endswith(".txt") and f.lower() != "basic_english.csv"] 
             if val_files:
                 st.caption("**Active Wordlists:**")
+                if 'active_wordlists' not in st.session_state:
+                    st.session_state['active_wordlists'] = {}
+                    
                 for f in val_files:
-                    st.write(f"- `{f}`")
+                    list_key = f"USER-DEFINED: {os.path.splitext(f)[0].upper()}"
+                    # Default to active if newly added
+                    if list_key not in st.session_state['active_wordlists']:
+                        st.session_state['active_wordlists'][list_key] = True
+                        
+                    is_active = st.checkbox(f, value=st.session_state['active_wordlists'][list_key], key=f"wl_cb_{f}")
+                    st.session_state['active_wordlists'][list_key] = is_active
         except:
             pass
 

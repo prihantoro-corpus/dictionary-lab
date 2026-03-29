@@ -151,6 +151,15 @@ def check_token(token, lemma=None, language='English'):
     
     # Check File-based Lists
     for list_name, data in lists.items():
+        # Check if list is disabled by user in the UI
+        try:
+            import streamlit as st
+            active_state = st.session_state.get('active_wordlists', {})
+            if list_name in active_state and not active_state[list_name]:
+                continue
+        except:
+            pass
+
         found_val = None
         
         # 1. Check Token
