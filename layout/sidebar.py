@@ -386,36 +386,47 @@ def render():
 
     # --- Personal Overrides File (Persistence) ---
     with st.sidebar.expander("🛠️ Personal Overrides Management", expanded=True):
-        st.caption("Specify the path to your personal JSON file:")
+        st.caption("Manage your personal JSON dictionary file:")
         
-        # Text input for file path
-        default_path = st.session_state.get('personal_file_path', 'personal_overrides.json')
-        file_path_input = st.text_input(
-            "Personal File Path",
-            value=default_path,
-            help="Enter the full path to your personal modifications JSON file. The file will be created if it doesn't exist."
-        )
+        col1, col2 = st.columns(2)
         
-        if st.button("✅ Set & Load File", use_container_width=True):
-            st.session_state['personal_file_path'] = file_path_input
-            # Create file if it doesn't exist
-            if not os.path.exists(file_path_input):
-                try:
-                    # Create directory if needed
-                    os.makedirs(os.path.dirname(file_path_input) or '.', exist_ok=True)
-                    save_overrides(file_path_input, {})
-                    st.success(f"Created new file: {file_path_input}")
-                except Exception as e:
-                    st.error(f"Could not create file: {e}")
-            else:
-                # Load existing file
-                loaded_data = load_overrides(file_path_input)
+        if col1.button("📂 Open Existing", use_container_width=True):
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            root.wm_attributes('-topmost', 1)
+            file_path = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")])
+            root.destroy()
+            
+            if file_path:
+                st.session_state['personal_file_path'] = file_path
+                loaded_data = load_overrides(file_path)
                 if loaded_data is not None:
                     st.session_state['overrides'] = loaded_data
-                    st.success(f"Loaded from {file_path_input}!")
+                    st.success(f"Loaded from {file_path}!")
                 else:
                     st.error("Failed to load file.")
-            st.rerun()
+                st.rerun()
+
+        if col2.button("🆕 Create New", use_container_width=True):
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            root.wm_attributes('-topmost', 1)
+            file_path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON files", "*.json")])
+            root.destroy()
+            
+            if file_path:
+                st.session_state['personal_file_path'] = file_path
+                try:
+                    save_overrides(file_path, {})
+                    st.session_state['overrides'] = {}
+                    st.success(f"Created new file: {file_path}")
+                except Exception as e:
+                    st.error(f"Could not create file: {e}")
+                st.rerun()
 
         p_path = st.session_state.get('personal_file_path', 'personal_overrides.json')
         st.info(f"**Current file:**\n`{p_path}`")
