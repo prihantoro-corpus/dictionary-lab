@@ -334,7 +334,8 @@ def render():
                 st.session_state['corpus_selection_mode'] = None
                 
                 st.cache_data.clear()
-                st.success(f"✅ Loaded {len(loaded_names)} corpus/corpora. Now fully searchable!")
+                file_names = ", ".join(loaded_names + [f"{ext}" for ext in []])
+                st.session_state['corpus_loaded_success_msg'] = f"corpus loaded successfully: '{', '.join(loaded_names)}'"
                 st.rerun()
         
         # Reset button

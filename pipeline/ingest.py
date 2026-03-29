@@ -43,7 +43,7 @@ class CorpusParser:
             elif len(parts) == 2:
                  return 'token', {'token': parts[0], 'tag': parts[1], 'lemma': parts[0]}
             else:
-                 return 'token', {'token': parts[0], 'tag': 'UNK', 'lemma': parts[0]}
+                 return 'token', {'token': parts[0], 'tag': 'NA', 'lemma': parts[0]}
 
     def ingest_file(self, filepath):
         """Simplifies ingestion by using filename as corpus name."""
@@ -60,8 +60,12 @@ class CorpusParser:
                 # Check first few non-empty lines for tabs
                 lines_checked = 0
                 for line in test_f:
-                    if line.strip():
-                        if '\t' not in line and not (line.strip().startswith('<') and line.strip().endswith('>')):
+                    stripped = line.strip()
+                    if stripped:
+                        # A vertical tag should be just the tag, e.g., <doc id="1">
+                        # Lines like <u ...>text</u> have the first '>' not at the end.
+                        is_single_tag = stripped.startswith('<') and stripped.endswith('>') and stripped.find('>') == len(stripped) - 1
+                        if '\t' not in stripped and not is_single_tag:
                             # Found a line that is NOT a tag and has NO tabs -> likely raw text
                             is_vertical = False
                             break
@@ -275,7 +279,7 @@ class CorpusParser:
                         for w in words:
                             tokens_to_add.append({
                                 'token': w,
-                                'tag': 'UNK',
+                                'tag': 'NA',
                                 'lemma': w
                             })
                 else:
@@ -284,7 +288,7 @@ class CorpusParser:
                     for w in words:
                         tokens_to_add.append({
                             'token': w,
-                            'tag': 'UNK',
+                            'tag': 'NA',
                             'lemma': w
                         })
                 

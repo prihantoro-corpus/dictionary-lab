@@ -109,6 +109,7 @@ def render_sense_editor(token, tag, initial_data, where_clause="1=1", params=())
                         
             return result
 
+        new_tag = st.text_input("POS Tag / Label", value=st.session_state.get(f"val_tag_{token}_{tag}", tag), key=f"val_tag_{token}_{tag}")
         new_pron = render_ai_field("Pronunciation", initial_data.get('pronunciation', ''), f"edit_pron_{token}_{tag}", "generate_pronunciation")
         new_freq = st.number_input("Frequency", value=int(initial_data.get('frequency', 0)), key=f"edit_freq_{token}_{tag}")
         new_def = render_ai_field("Definition", initial_data.get('definition', ''), f"edit_def_{token}_{tag}", "generate_definition", is_area=True)
@@ -124,7 +125,13 @@ def render_sense_editor(token, tag, initial_data, where_clause="1=1", params=())
         if st.button("Save Changes", key=f"save_{token}_{tag}"):
             if token not in st.session_state['overrides']:
                 st.session_state['overrides'][token] = {}
-            st.session_state['overrides'][token][tag] = {
+                
+            if new_tag != tag and tag in st.session_state['overrides'][token]:
+                 # Only delete the old override if it was purely manual and they are renaming it
+                 if st.session_state['overrides'][token][tag].get('is_manual'):
+                     del st.session_state['overrides'][token][tag]
+                     
+            st.session_state['overrides'][token][new_tag] = {
                 "pronunciation": new_pron,
                 "frequency": new_freq,
                 "definition": new_def,
@@ -860,7 +867,7 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                     pron_links_html = "<span style=\"font-size: 18px; color: #666;\">🇮🇩</span>"
                 
                 # Build wordlist badges (for all languages now)
-                wl_badges = manager.check_token(query, lemma=lemma)
+                wl_badges = manager.check_token(query, lemma=lemma, language=language)
                 
                 # Get PMW range for relative percentage calculation
                 pmw_range = cache.get_pmw_range(corpus_hash, where_clause, params)

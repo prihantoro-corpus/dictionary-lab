@@ -39,16 +39,20 @@ def get_vocabulary_profile(where_clause="1=1", params=()):
         # CEFR case
         if manager.HAS_CEFR:
             from cefrpy import CEFRAnalyzer
+            import struct
             analyzer = CEFRAnalyzer()
             cefr_covered = 0
             cefr_breakdown = {}
             for lemma in lemmas:
-                res_dict = analyzer.get_pos_level_dict_for_word(lemma)
-                if res_dict:
-                    cefr_covered += 1
-                    levels = sorted(list(set([lvl.name for lvl in res_dict.values()])))
-                    if levels:
-                        cefr_breakdown[levels[-1]] = cefr_breakdown.get(levels[-1], 0) + 1
+                try:
+                    res_dict = analyzer.get_pos_level_dict_for_word(lemma)
+                    if res_dict:
+                        cefr_covered += 1
+                        levels = sorted(list(set([lvl.name for lvl in res_dict.values()])))
+                        if levels:
+                            cefr_breakdown[levels[-1]] = cefr_breakdown.get(levels[-1], 0) + 1
+                except (struct.error, Exception):
+                    pass
             if cefr_covered > 0:
                 results['CEFR'] = {
                     'total_corpus_unique': total_unique,

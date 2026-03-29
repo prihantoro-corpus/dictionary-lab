@@ -21,6 +21,9 @@ def main():
     # Render Sidebar
     filters = sidebar.render()
 
+    if st.session_state.get('corpus_loaded_success_msg'):
+        st.success(st.session_state['corpus_loaded_success_msg'])
+        
     # Render Main View
     # Pass the entire filters dict or unpack
     main_view.render(

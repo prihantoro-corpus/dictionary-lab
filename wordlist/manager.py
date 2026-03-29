@@ -117,10 +117,15 @@ def load_wordlists():
                 list_name = f"USER-DEFINED: {os.path.splitext(filename)[0].upper()}"
                 with open(filepath, 'r', encoding='utf-8') as f:
                     for line in f:
-                        clean_word = line.strip().lower()
-                        if clean_word:
-                            # Empty string for value so it renders cleanly
-                            entries[clean_word] = ""
+                        line_stripped = line.strip()
+                        if not line_stripped: continue
+                        
+                        parts = line_stripped.split()
+                        if not parts: continue
+                        
+                        clean_word = parts[0].lower()
+                        val = " ".join(parts[1:]) if len(parts) > 1 else ""
+                        entries[clean_word] = val
                 loaded[list_name] = entries
 
         except Exception as e:
@@ -129,7 +134,7 @@ def load_wordlists():
     _cache = loaded
     return _cache
 
-def check_token(token, lemma=None):
+def check_token(token, lemma=None, language='English'):
     """
     Checks token against loaded lists.
     Priority:
@@ -176,4 +181,7 @@ def check_token(token, lemma=None):
         except Exception as e:
             pass # CEFR lookup failed safely
             
+    if language != 'English':
+        badges = [b for b in badges if b['name'].startswith('USER-DEFINED')]
+        
     return badges
