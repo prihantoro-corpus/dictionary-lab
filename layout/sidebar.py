@@ -105,8 +105,8 @@ def get_metadata_values(key, corpora=None):
 def render():
     # Manual Link at the top
     st.sidebar.markdown(
-        '<div style="text-align: center; margin-bottom: 10px;">'
-        '<a href="https://docs.google.com/document/d/1x-arcEkxjMc_9DeBYZUcGxnrWl0JW0Bj5_N6o_Jfyfc/edit?usp=sharing" '
+        '<div style="text-align: left; margin-bottom: 10px;">'
+        '<a href="https://docs.google.com/document/d/1x-arcEkxjMc_9DeBYZUcGxnrWl0JW0Bj5_N6o_Jfyfc/edit?usp=drive_link" '
         'target="_blank" style="text-decoration: none; color: #1976d2; font-size: 16px; font-weight: bold;">'
         '📖 Manual</a>'
         '</div>',
