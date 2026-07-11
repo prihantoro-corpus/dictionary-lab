@@ -12,3 +12,11 @@ python-Levenshtein
 google-generativeai
 requests
 numpy
+youtube-transcript-api
+youtube-comment-downloader
+requests
+beautifulsoup4
+ddgs
+
+deep-translator
+trafilatura

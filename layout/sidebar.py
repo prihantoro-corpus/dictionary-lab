@@ -139,90 +139,139 @@ def render():
         # Step 1: Show initial selection buttons or the selected mode interface
         if st.session_state['corpus_selection_mode'] is None:
             st.caption("Choose how to add corpora:")
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             
             if col1.button("📤 File Upload", use_container_width=True):
                 st.session_state['corpus_selection_mode'] = "File Upload"
                 st.rerun()
             
-            if col2.button("📚 Built-in Corpora", use_container_width=True):
+            if col2.button("📚 Built-in", use_container_width=True):
                 st.session_state['corpus_selection_mode'] = "Built-in Corpora"
                 st.rerun()
+                
+            if col3.button("🌐 Online", use_container_width=True):
+                st.session_state['corpus_selection_mode'] = "Online Corpus"
+                st.rerun()
 
-        if not is_parallel:
-            if st.session_state['corpus_selection_mode'] is not None:
+        if st.session_state['corpus_selection_mode'] is not None:
+            if not is_parallel:
                 st.caption("Select Source Language:")
                 st.session_state['corpus_language'] = st.selectbox(
                     "Source Language", 
                     ['English', 'Indonesian', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'], 
-                    index=['English', 'Indonesian', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'].index(st.session_state['corpus_language']) if st.session_state['corpus_language'] in ['English', 'Indonesian', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'] else 7,
+                    index=['English', 'Indonesian', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'].index(st.session_state.get('corpus_language', 'English')) if st.session_state.get('corpus_language', 'English') in ['English', 'Indonesian', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'] else 7,
                     key="mono_lang"
                 )
+            else:
+                st.info("🔗 **Parallel Mode Active**")
+                colA, colB = st.columns(2)
+                with colA:
+                    st.session_state['corpus_language'] = st.selectbox("Source Language", ['English', 'Indonesian', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'], index=0, key="p_src_lang")
+                with colB:
+                    st.session_state['target_language'] = st.selectbox("Target Language", ['English', 'Indonesian', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'], index=1, key="p_tgt_lang")
 
             # Step 2: Show appropriate interface based on mode
             if st.session_state['corpus_selection_mode'] == "File Upload":
-                st.caption("📤 Upload one or more corpus files:")
-                uploaded_files = st.file_uploader("Select files", type=None, accept_multiple_files=True, key="mono_upload")
-                if uploaded_files:
-                    st.session_state['staged_files'] = uploaded_files
-                    st.info(f"📋 **{len(uploaded_files)} file(s) selected**")
+                if not is_parallel:
+                    st.caption("📤 Upload one or more corpus files:")
+                    uploaded_files = st.file_uploader("Select files", type=None, accept_multiple_files=True, key="mono_upload")
+                    if uploaded_files:
+                        st.session_state['staged_files'] = uploaded_files
+                        st.info(f"📋 **{len(uploaded_files)} file(s) selected**")
+                    else:
+                        st.session_state['staged_files'] = []
                 else:
-                    st.session_state['staged_files'] = []
+                    st.markdown("**1. Source Corpus**")
+                    src_selection = st.file_uploader("Upload Source File", type=['xml', 'txt'], key="ups_src")
+                    st.markdown("**2. Target Corpus**")
+                    tgt_selection = st.file_uploader("Upload Target File", type=['xml', 'txt'], key="ups_tgt")
+                    st.session_state['staged_parallel'] = (src_selection, tgt_selection) if src_selection and tgt_selection else None
 
             elif st.session_state['corpus_selection_mode'] == "Built-in Corpora":
-                st.caption("📚 Select from available built-in corpora:")
                 disk_corpora_map = get_disk_corpora()
                 available_corpora = sorted([clean_name(c) for c in disk_corpora_map.keys()])
                 if not available_corpora:
                     st.warning("No built-in corpora found.")
+                    st.session_state['staged_parallel'] = None
                 else:
-                    selected_builtin = st.multiselect("Choose corpora:", options=available_corpora, key="mono_builtin")
-                    st.session_state['staged_builtin'] = selected_builtin
-        
-        elif st.session_state['corpus_selection_mode'] is not None:
-            # --- Parallel Mode UI ---
-            st.info("🔗 **Parallel Mode Active**")
-            
-            disk_corpora_map = get_disk_corpora()
-            available_corpora = sorted([clean_name(c) for c in disk_corpora_map.keys()])
-
-            if st.session_state['corpus_selection_mode'] == "Built-in Corpora" and not available_corpora:
-                st.warning("No built-in corpora found on disk.")
-                st.session_state['staged_parallel'] = None
-            else:
-                # Box 1: Source
-                with st.container(border=True):
-                    st.markdown("**1. Source Corpus**")
-                    src_lang = st.selectbox("Source Language", ['English', 'Indonesian', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'], index=0, key="p_src_lang")
-                    st.session_state['corpus_language'] = src_lang
-                    
-                    if st.session_state['corpus_selection_mode'] == "File Upload":
-                        src_selection = st.file_uploader("Upload Source File", type=['xml', 'txt'], key="ups_src")
+                    if not is_parallel:
+                        st.caption("📚 Select from available built-in corpora:")
+                        selected_builtin = st.multiselect("Choose corpora:", options=available_corpora, key="mono_builtin")
+                        st.session_state['staged_builtin'] = selected_builtin
                     else:
+                        st.markdown("**1. Source Corpus**")
                         src_selection = st.selectbox("Select Source Corpus", options=available_corpora, key="para_src_builtin")
-            
-                # Box 2: Target
-                with st.container(border=True):
-                    st.markdown("**2. Target Corpus**")
-                    tgt_lang = st.selectbox("Target Language", ['English', 'Indonesian', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'], index=1, key="p_tgt_lang")
-                    st.session_state['target_language'] = tgt_lang
-                    
-                    if st.session_state['corpus_selection_mode'] == "File Upload":
-                        tgt_selection = st.file_uploader("Upload Target File", type=['xml', 'txt'], key="ups_tgt")
-                    else:
+                        st.markdown("**2. Target Corpus**")
                         tgt_selection = st.selectbox("Select Target Corpus", options=available_corpora, key="para_tgt_builtin")
+                        st.session_state['staged_parallel'] = (src_selection, tgt_selection) if src_selection and tgt_selection else None
+
+            elif st.session_state['corpus_selection_mode'] == "Online Corpus":
+                st.caption("🌐 Build Corpus from Online Sources:")
+                online_mode = st.radio("Source Mode", ["YouTube", "Mastodon", "BlueSky", "Link Collection", "Keyword Search"], horizontal=True)
+                st.session_state['online_builder_mode'] = online_mode
                 
-                st.session_state['staged_parallel'] = (src_selection, tgt_selection) if src_selection and tgt_selection else None
+                if online_mode == "YouTube":
+                    st.session_state['online_url'] = st.text_input("YouTube Video URL", placeholder="https://www.youtube.com/watch?v=...")
+                    st.session_state['online_yt_mode'] = st.selectbox("What to extract?", ["both", "transcript", "comments"])
+                elif online_mode == "Mastodon" or online_mode == "BlueSky":
+                    urls = st.text_area(f"{online_mode} URLs (one per line)", placeholder="https://...")
+                    st.session_state['online_urls'] = [u.strip() for u in urls.split('\n') if u.strip()]
+                    st.session_state['online_social_mode'] = st.selectbox("Extract:", ["both", "post", "replies"])
+                elif online_mode == "Link Collection":
+                    urls = st.text_area("URLs to scrape (one per line)", placeholder="https://...")
+                    st.session_state['online_urls'] = [u.strip() for u in urls.split('\n') if u.strip()]
+                elif online_mode == "Keyword Search":
+                    kw = st.text_input("Keywords (comma separated)", placeholder="corpus linguistics, parsing")
+                    st.session_state['online_keywords'] = [k.strip() for k in kw.split(',') if k.strip()]
+                    
+                    st.session_state['online_max_links'] = st.selectbox("Max Links to Fetch", [25, 50, 75, 100], index=1)
+                    
+                    if st.button("🔍 Find Links"):
+                        if not st.session_state['online_keywords']:
+                            st.warning("Please provide keywords.")
+                        else:
+                            with st.spinner("Searching for links..."):
+                                from pipeline.online_corpus import build_online_corpus
+                                params = {
+                                    'keywords': st.session_state['online_keywords'],
+                                    'max_results': st.session_state['online_max_links']
+                                }
+                                links, _ = build_online_corpus("keyword_fetch", params)
+                                if links:
+                                    st.session_state['keyword_found_links'] = links
+                                else:
+                                    st.warning("No links found.")
+                                    if 'keyword_found_links' in st.session_state:
+                                        del st.session_state['keyword_found_links']
+                                        
+                    if st.session_state.get('keyword_found_links'):
+                        st.session_state['online_links_to_scrape'] = st.multiselect(
+                            "Select links to scrape (Easy-to-scrape domains at the top)", 
+                            options=st.session_state['keyword_found_links'], 
+                            default=st.session_state['keyword_found_links']
+                        )
+                        
+                        if st.session_state['online_links_to_scrape']:
+                            est_time = max(1, len(st.session_state['online_links_to_scrape']) // 15)
+                            if is_parallel:
+                                est_time = max(1, len(st.session_state['online_links_to_scrape']) // 3) # Much longer for sentence-by-sentence translation
+                            st.info(f"⏱️ Estimated processing time: ~{est_time} minute(s)")
         
         # Step 3: Load Corpus button
         st.divider()
         if not is_parallel:
-            has_staged_content = (
-                (st.session_state['corpus_selection_mode'] == "File Upload" and st.session_state['staged_files']) or
-                (st.session_state['corpus_selection_mode'] == "Built-in Corpora" and st.session_state['staged_builtin'])
-            )
+            has_staged_content = False
+            if st.session_state['corpus_selection_mode'] == "File Upload" and st.session_state.get('staged_files'):
+                has_staged_content = True
+            elif st.session_state['corpus_selection_mode'] == "Built-in Corpora" and st.session_state.get('staged_builtin'):
+                has_staged_content = True
+            elif st.session_state['corpus_selection_mode'] == "Online Corpus":
+                has_staged_content = True
         else:
-            has_staged_content = st.session_state.get('staged_parallel') is not None
+            if st.session_state.get('corpus_selection_mode') == "Online Corpus":
+                has_staged_content = True
+            else:
+                has_staged_content = st.session_state.get('staged_parallel') is not None
         
         if st.button("🚀 Load Corpus", type="primary", use_container_width=True, disabled=not has_staged_content):
             loaded_names = []
@@ -299,6 +348,126 @@ def render():
                 else:
                     st.success(f"✅ Parallel Corpora perfectly aligned ({src_count} sentences).")
             
+            # Process Online Corpus
+            elif st.session_state['corpus_selection_mode'] == "Online Corpus":
+                from pipeline import ingest
+                from pipeline.online_corpus import build_online_corpus
+                parser = ingest.CorpusParser()
+                
+                mode = st.session_state.get('online_builder_mode', '').lower().replace(' ', '_')
+                if mode == "link_collection": mode = "links"
+                if mode == "keyword_search": mode = "keyword"
+                
+                params = {}
+                if mode == "youtube":
+                    params['url'] = st.session_state.get('online_url', '')
+                    params['mode'] = st.session_state.get('online_yt_mode', 'both')
+                elif mode in ("mastodon", "bluesky", "links"):
+                    params['urls'] = st.session_state.get('online_urls', [])
+                    params['links'] = st.session_state.get('online_urls', [])
+                    params['mode'] = st.session_state.get('online_social_mode', 'both')
+                elif mode == "keyword":
+                    params['keywords'] = st.session_state.get('online_keywords', [])
+                    if 'online_links_to_scrape' in st.session_state:
+                        mode = "keyword_scrape"
+                        params['links'] = st.session_state['online_links_to_scrape']
+                    else:
+                        st.error("Please click 'Find Links' and select links first.")
+                        st.stop()
+                
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                def ui_progress_callback(fraction, message):
+                    progress_bar.progress(fraction)
+                    status_text.text(message)
+                    
+                files, warning = build_online_corpus(mode, params, progress_callback=ui_progress_callback)
+                    
+                if warning:
+                    st.warning(warning)
+                        
+                if files:
+                    corpus_clean_name = f"Online_{mode.capitalize()}"
+                    if mode == "keyword_scrape":
+                        corpus_clean_name = "Online_Keyword"
+                    
+                    # Show which URLs were scraped
+                    scraped_urls = [f.get('url') for f in files if f.get('url')]
+                    if scraped_urls:
+                        with st.expander(f"🌐 Successfully scraped {len(scraped_urls)} webpages"):
+                            for u in scraped_urls:
+                                st.markdown(f"- [{u}]({u})")
+                    
+                    # Combine all files into one big file and ingest it
+                    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".txt")
+                    try:
+                        with os.fdopen(tmp_fd, 'w', encoding='utf-8') as tmp:
+                            for file_data in files:
+                                tmp.write(file_data['content'])
+                                tmp.write("\n")
+                        
+                        if not is_parallel:
+                            status_text.text(f"Starting NLP processing for {corpus_clean_name}...")
+                            parser.process_file(tmp_path, corpus_clean_name, lang_code=st.session_state.get('corpus_language', 'English'), progress_callback=ui_progress_callback)
+                            loaded_names.append(corpus_clean_name)
+                        else:
+                            import spacy
+                            from pipeline.translator import translate_sentences
+                            
+                            status_text.text("Segmenting sentences for parallel translation...")
+                            # Segment using SpaCy Sentencizer before translation
+                            with open(tmp_path, 'r', encoding='utf-8') as f:
+                                raw_text = f.read()
+                                
+                            nlp = spacy.blank("en")
+                            nlp.add_pipe('sentencizer')
+                            # Because it could be very large, parse in chunks if needed. For 500k words, it's fine.
+                            doc = nlp(raw_text)
+                            sentences = [s.text.strip() for s in doc.sents if s.text.strip()]
+                            
+                            # Auto-translate
+                            target_lang = st.session_state.get('target_language', 'English')
+                            translated_sentences = translate_sentences(sentences, target_lang, progress_callback=ui_progress_callback)
+                            
+                            # Ingest both!
+                            src_name = f"{corpus_clean_name}_SRC"
+                            tgt_name = f"{corpus_clean_name}_TGT"
+                            
+                            tmp_fd_src, tmp_path_src = tempfile.mkstemp(suffix=".txt")
+                            tmp_fd_tgt, tmp_path_tgt = tempfile.mkstemp(suffix=".txt")
+                            
+                            try:
+                                with os.fdopen(tmp_fd_src, 'w', encoding='utf-8') as fs:
+                                    fs.write("\n".join(sentences))
+                                with os.fdopen(tmp_fd_tgt, 'w', encoding='utf-8') as ft:
+                                    ft.write("\n".join(translated_sentences))
+                                    
+                                status_text.text(f"Ingesting Source Corpus ({src_name})...")
+                                parser.process_file(tmp_path_src, src_name, lang_code=st.session_state.get('corpus_language', 'English'), progress_callback=ui_progress_callback)
+                                
+                                status_text.text(f"Ingesting Target Corpus ({tgt_name})...")
+                                parser.process_file(tmp_path_tgt, tgt_name, lang_code=target_lang, progress_callback=ui_progress_callback)
+                                
+                                loaded_names.extend([src_name, tgt_name])
+                                st.session_state['parallel_pair'] = (src_name, tgt_name)
+                            finally:
+                                if os.path.exists(tmp_path_src): os.remove(tmp_path_src)
+                                if os.path.exists(tmp_path_tgt): os.remove(tmp_path_tgt)
+                        
+                        # Clean up UI state
+                        if 'keyword_found_links' in st.session_state:
+                            del st.session_state['keyword_found_links']
+                    except Exception as e:
+                        st.error(f"❌ Failed to process online corpus: {e}")
+                    finally:
+                        if os.path.exists(tmp_path):
+                            os.remove(tmp_path)
+                        status_text.empty()
+                        progress_bar.empty()
+                else:
+                    st.error("No content could be retrieved from the online source.")
+
             # Process built-in corpora
             elif st.session_state['corpus_selection_mode'] == "Built-in Corpora" and st.session_state['staged_builtin']:
                 from pipeline import ingest

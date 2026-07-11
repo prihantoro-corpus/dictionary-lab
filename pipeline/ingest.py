@@ -51,7 +51,7 @@ class CorpusParser:
         corpus_name = os.path.splitext(os.path.basename(filepath))[0]
         self.process_file(filepath, corpus_name)
 
-    def process_file(self, filepath, corpus_name, lang_code=None):
+    def process_file(self, filepath, corpus_name, lang_code=None, progress_callback=None):
         conn, is_shared = get_connection(allow_fallback=False)
         try:
             # 1. Detect Format
@@ -73,8 +73,9 @@ class CorpusParser:
                         if lines_checked > 10: break
             
             if not is_vertical:
+                if progress_callback: progress_callback(0.01, f"Initializing SpaCy for {lang_code}...")
                 print(f"Detected RAW text for {filepath}. Processing with Stanza (Language: {lang_code})...")
-                self.process_raw_text(filepath, corpus_name, lang_code, conn)
+                self.process_raw_text(filepath, corpus_name, lang_code, conn, progress_callback=progress_callback)
                 return
 
             # --- EXISTING VERTICAL PROCESSING ---
@@ -146,7 +147,7 @@ class CorpusParser:
             print(f"Recreating indexes for corpus '{corpus_name}'...")
             add_indexes(conn)
 
-            print(f"Finished processing {filepath}. Total tokens: {current_id}")
+            print(f"Finished processing {filepath}. Total tokens: {current_id - start_id}")
         except Exception as e:
             print(f"CRITICAL ERROR during ingestion: {e}")
             raise e
@@ -154,27 +155,41 @@ class CorpusParser:
             if not is_shared:
                 conn.close()
 
-    def process_raw_text(self, filepath, corpus_name, lang_code, conn):
-        import stanza
+    def process_raw_text(self, filepath, corpus_name, lang_code, conn, progress_callback=None):
+        import spacy
         import os
+        from spacy.cli import download
         
-        # Stanza Setup
-        stanza_lang = 'en' # Default
+        # SpaCy Setup
+        spacy_model = 'en_core_web_sm' # Default
         if lang_code:
             lang_map = {
-                'English': 'en', 'Indonesian': 'id', 'Chinese': 'zh', 
-                'Japanese': 'ja', 'Korean': 'ko', 'Arabic': 'ar'
+                'English': 'en_core_web_sm', 
+                'Chinese': 'zh_core_web_sm', 
+                'Japanese': 'ja_core_news_sm', 
+                'Korean': 'ko_core_news_sm', 
+                # Spanish, French, German, etc. could be added. 
+                # Indonesian/Arabic/Javanese don't have official lightweight core models in Spacy out-of-the-box,
+                # so we will use the multi-language model (xx_ent_wiki_sm) as a fallback.
+                'Indonesian': 'xx_ent_wiki_sm',
+                'Arabic': 'xx_ent_wiki_sm',
+                'Javanese': 'xx_ent_wiki_sm',
+                'Other': 'xx_ent_wiki_sm'
             }
-            stanza_lang = lang_map.get(lang_code, 'other')
+            spacy_model = lang_map.get(lang_code, 'xx_ent_wiki_sm')
         
         nlp = None
-        if stanza_lang != 'other':
+        if spacy_model:
             try:
-                # Check if model exists, if not download
-                stanza.download(stanza_lang, processors='tokenize,pos,lemma')
-                nlp = stanza.Pipeline(stanza_lang, processors='tokenize,pos,lemma', use_gpu=False, verbose=False)
+                # Try to load, if fails, download
+                if not spacy.util.is_package(spacy_model):
+                    print(f"Downloading SpaCy model {spacy_model}...")
+                    download(spacy_model)
+                nlp = spacy.load(spacy_model, disable=['ner', 'parser', 'textcat'])
+                if spacy_model.startswith('xx_'):
+                    nlp.add_pipe('sentencizer') # Multi-lang needs sentencizer
             except Exception as e:
-                print(f"Failed to load Stanza for {stanza_lang}: {e}. Falling back to whitespace.")
+                print(f"Failed to load SpaCy model {spacy_model}: {e}. Falling back to whitespace.")
                 nlp = None
 
         # Drop indexes
@@ -189,6 +204,8 @@ class CorpusParser:
              current_id = res[0] if res[0] is not None else 0
         except:
             current_id = 0
+            
+        start_id = current_id
 
         # --- ROOT TAG INJECTION ---
         root_attr_value = os.path.splitext(os.path.basename(filepath))[0]
@@ -249,8 +266,15 @@ class CorpusParser:
             if not sentences:
                 sentences = [text_segment]
             
+            # Progress reporting logic
+            total_sentences = len(sentences)
+            
             # Process each sentence
-            for sentence_text in sentences:
+            for idx, sentence_text in enumerate(sentences):
+                if progress_callback and idx % max(1, total_sentences // 20) == 0:
+                    fraction = min(0.99, idx / total_sentences)
+                    progress_callback(fraction, f"SpaCy NLP Parsing: Sentence {idx}/{total_sentences}")
+                    
                 sentence_text = sentence_text.strip()
                 if not sentence_text: continue
                 
@@ -261,19 +285,17 @@ class CorpusParser:
                 tokens_to_add = []
                 
                 if nlp:
-                    # Stanza Processing (per sentence)
+                    # SpaCy Processing (per sentence)
                     try:
                         doc = nlp(sentence_text)
-                        # Stanza may further split, but we already have sentence boundaries
-                        for stanza_sent in doc.sentences:
-                            for word in stanza_sent.words:
-                                tokens_to_add.append({
-                                    'token': word.text,
-                                    'tag': word.upos,
-                                    'lemma': word.lemma if word.lemma else word.text
-                                })
+                        for word in doc:
+                            tokens_to_add.append({
+                                'token': word.text,
+                                'tag': word.pos_ if word.pos_ else 'NA',
+                                'lemma': word.lemma_ if word.lemma_ else word.text
+                            })
                     except Exception as e:
-                        print(f"Stanza processing failed: {e}. Using fallback.")
+                        print(f"SpaCy processing failed: {e}. Using fallback.")
                         # Fallback to whitespace
                         words = sentence_text.split()
                         for w in words:
@@ -317,7 +339,7 @@ class CorpusParser:
         
         print(f"Recreating indexes for corpus '{corpus_name}'...")
         add_indexes(conn)
-        print(f"Finished processing RAW {filepath}. Total tokens: {current_id}")
+        print(f"Finished processing RAW {filepath}. Total tokens: {current_id - start_id}")
 
     def _bulk_insert(self, conn, data):
         if not data: return
