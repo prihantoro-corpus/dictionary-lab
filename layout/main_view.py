@@ -642,13 +642,37 @@ def render_multiword_view(query, where_clause, params, stop_words, collocate_fil
     # 8. Collocates (Graph/List)
     st.divider()
     st.subheader("Top-20 Collocates")
-    collocs = cache.get_phrase_collocates(corpus_hash, query, limit=20, where_clause=where_clause, params=params, stop_words=stop_words, allowed_words=collocate_filter, skip_punct=skip_punct)
     
-    if collocs:
+    color_options = {
+        "Nouns (Blue)": ['NN', 'NNS', 'NP', 'NPS', 'NNP', 'NNPS'],
+        "Verbs (Red)": ['VV', 'VVP', 'VVZ', 'VVD', 'VVG', 'VVN', 'VB', 'VH'],
+        "Adjectives (Green)": ['JJ', 'JJR', 'JJS'],
+        "Adverbs (Purple)": ['RB', 'RBR', 'RBS'],
+        "Prepositions (Brown)": ['IN'],
+        "Others": ['DT', 'PRP', 'PP', 'PP$', 'MD', 'CD', 'FW']
+    }
+    selected_colors = st.multiselect("Filter Collocates by POS Category", options=list(color_options.keys()), default=list(color_options.keys()), key=f"pos_filter_phrase_{query}")
+    allowed_pos_tags = []
+    for sc in selected_colors:
+        allowed_pos_tags.extend(color_options[sc])
+        
+    raw_collocs = cache.get_phrase_collocates(corpus_hash, query, limit=100, where_clause=where_clause, params=params, stop_words=stop_words, allowed_words=collocate_filter, skip_punct=skip_punct)
+    
+    collocs = []
+    for c in raw_collocs:
+        ctag = c.get('tag', '')
+        if ctag in allowed_pos_tags or ctag[:2] in [t[:2] for t in allowed_pos_tags]:
+            collocs.append(c)
+        elif "Others" in selected_colors and ctag not in sum(color_options.values(), []):
+            collocs.append(c)
+            
+    collocs_subset = collocs[:20]
+    
+    if collocs_subset:
         c_tab1, c_tab2 = st.tabs(["📋 List View", "🕸️ Network Graph"])
         with c_tab1:
             chunk_size = 5
-            chunks = [collocs[i:i + chunk_size] for i in range(0, len(collocs), chunk_size)]
+            chunks = [collocs_subset[i:i + chunk_size] for i in range(0, len(collocs_subset), chunk_size)]
             cols_grid = st.columns(4)
             for col_idx, chunk in enumerate(chunks):
                 if col_idx < 4:
@@ -663,7 +687,21 @@ def render_multiword_view(query, where_clause, params, stop_words, collocate_fil
         with c_tab2:
             st.caption("Collocates positioned by left/right dominance. Distance = Strength.")
             c_size = st.slider("Chart Size", 0.5, 2.0, 1.0, 0.1, key=f"size_phrase_{query}")
-            components.render_collocate_chart(collocs, node_word=query, chart_size=c_size)
+            
+            examples_dict = {}
+            for item in collocs_subset:
+                c_word = item['collocate']
+                kwic_line = cache.get_phrase_collocate_kwic(corpus_hash, query, c_word, window=5, limit=1, where_clause=where_clause, params=params, skip_punct=skip_punct)
+                if kwic_line:
+                    kl = kwic_line[0]
+                    l_str = " ".join(kl['left']) if isinstance(kl['left'], list) else str(kl['left'])
+                    r_str = " ".join(kl['right']) if isinstance(kl['right'], list) else str(kl['right'])
+                    if kl.get('full_sentence'):
+                        examples_dict[c_word] = f"{l_str} {kl['node']} {r_str}"
+                    else:
+                        examples_dict[c_word] = f"... {l_str} {kl['node']} {r_str} ..."
+                        
+            components.render_collocate_chart(collocs_subset, node_word=query, chart_size=c_size, examples_dict=examples_dict)
     else:
         st.info("No strong collocates found.")
 
@@ -1056,16 +1094,36 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                 
                 # Collocates
                 st.subheader("Top-20 Collocates")
+                
+                color_options = {
+                    "Nouns (Blue)": ['NN', 'NNS', 'NP', 'NPS', 'NNP', 'NNPS'],
+                    "Verbs (Red)": ['VV', 'VVP', 'VVZ', 'VVD', 'VVG', 'VVN', 'VB', 'VH'],
+                    "Adjectives (Green)": ['JJ', 'JJR', 'JJS'],
+                    "Adverbs (Purple)": ['RB', 'RBR', 'RBS'],
+                    "Prepositions (Brown)": ['IN'],
+                    "Others": ['DT', 'PRP', 'PP', 'PP$', 'MD', 'CD', 'FW']
+                }
+                selected_colors = st.multiselect("Filter Collocates by POS Category", options=list(color_options.keys()), default=list(color_options.keys()), key=f"pos_filter_{query}_{tag}")
+                allowed_pos_tags = []
+                for sc in selected_colors:
+                    allowed_pos_tags.extend(color_options[sc])
+                
                 coll_over = parse_manual_list(override.get('manual_collocates', ''))
                 if coll_over:
                     collocs = [{'collocate': r[0], 'score': float(r[1]) if len(r)>1 and r[1].replace('.', '', 1).isdigit() else 0.0, 'freq': 0} for r in coll_over]
+                    collocs_subset = collocs[:20]
                 else:
-                    collocs = cache.get_collocates(corpus_hash, query, limit=26, where_clause=where_clause, params=params, stop_words=stop_words, allowed_words=collocate_filter, skip_punct=skip_punct, pos_tag=tag)
+                    raw_collocs = cache.get_collocates(corpus_hash, query, limit=100, where_clause=where_clause, params=params, stop_words=stop_words, allowed_words=collocate_filter, skip_punct=skip_punct, pos_tag=tag)
+                    collocs = []
+                    for c in raw_collocs:
+                        ctag = c.get('tag', '')
+                        if ctag in allowed_pos_tags or ctag[:2] in [t[:2] for t in allowed_pos_tags]:
+                            collocs.append(c)
+                        elif "Others" in selected_colors and ctag not in sum(color_options.values(), []):
+                            collocs.append(c)
+                    collocs_subset = collocs[:20]
                 
-                if collocs:
-                    limit_n = 20
-                    collocs_subset = collocs[:limit_n]
-                    
+                if collocs_subset:
                     # Create Tabs
                     c_tab1, c_tab2 = st.tabs(["📋 List View", "🕸️ Network Graph"])
                     
@@ -1096,7 +1154,22 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                     with c_tab2:
                         st.caption("Collocates positioned by left/right dominance. Distance = Strength.")
                         c_size = st.slider("Chart Size", 0.5, 2.0, 1.0, 0.1, key=f"size_{query}_{tag}")
-                        components.render_collocate_chart(collocs_subset, node_word=query, chart_size=c_size)
+                        
+                        examples_dict = {}
+                        if not coll_over:
+                            for item in collocs_subset:
+                                c_word = item['collocate']
+                                kwic_line = cache.get_collocate_kwic(corpus_hash, query, c_word, window=5, limit=1, where_clause=where_clause, params=params, pos_tag=tag)
+                                if kwic_line:
+                                    kl = kwic_line[0]
+                                    l_str = " ".join(kl['left']) if isinstance(kl['left'], list) else str(kl['left'])
+                                    r_str = " ".join(kl['right']) if isinstance(kl['right'], list) else str(kl['right'])
+                                    if kl.get('full_sentence'):
+                                        examples_dict[c_word] = f"{l_str} {kl['node']} {r_str}"
+                                    else:
+                                        examples_dict[c_word] = f"... {l_str} {kl['node']} {r_str} ..."
+                        
+                        components.render_collocate_chart(collocs_subset, node_word=query, chart_size=c_size, examples_dict=examples_dict)
                     
                     st.divider()
                     

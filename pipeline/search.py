@@ -51,9 +51,9 @@ def get_lemma(token):
     return res[0] if res else token
 
 def get_forms_by_lemma(lemma):
-    """Returns all tokens that share this lemma."""
+    """Returns all tokens that share this lemma (case-insensitive, lowercase)."""
     conn, is_shared = get_connection()
-    res = safe_execute(conn, "SELECT DISTINCT token FROM tokens WHERE lemma = ?", (lemma,)).fetchall()
+    res = safe_execute(conn, "SELECT DISTINCT LOWER(token) FROM tokens WHERE lemma ILIKE ?", (lemma,)).fetchall()
     if not is_shared:
         conn.close()
     return [r[0] for r in res]
@@ -67,9 +67,9 @@ def get_pos_tags(token):
     return [r[0] for r in res]
 
 def get_related_words(token, limit=20):
-    """Returns tokens containing the search token as a substring (infix), excluding the token itself."""
+    """Returns tokens containing the search token as a substring (infix), excluding the token itself (case-insensitive, lowercase)."""
     conn, is_shared = get_connection()
-    query = "SELECT DISTINCT token FROM tokens WHERE token ILIKE ? AND token NOT ILIKE ? LIMIT ?"
+    query = "SELECT DISTINCT LOWER(token) FROM tokens WHERE token ILIKE ? AND token NOT ILIKE ? LIMIT ?"
     res = safe_execute(conn, query, (f"%{token}%", token, limit)).fetchall()
     if not is_shared:
         conn.close()

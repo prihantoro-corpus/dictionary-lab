@@ -97,22 +97,10 @@ def render_collocate_example(left, node, right, col_token=None, translation=None
     </div>
     """, unsafe_allow_html=True)
 
-import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
-
-# Configure Matplotlib to use fonts that support CJK and other scripts
-# Priority list for Windows/Standard fonts covering multiple languages
-plt.rcParams['font.family'] = ['sans-serif']
-plt.rcParams['font.sans-serif'] = [
-    'Microsoft YaHei', 'SimHei', 'Malgun Gothic', 'Meiryo', 'Arial Unicode MS', 
-    'Segoe UI', 'sans-serif'
-]
-# Ensure minus sign is rendered correctly
-plt.rcParams['axes.unicode_minus'] = False
-
+import plotly.graph_objects as go
 import numpy as np
 
-def render_collocate_chart(collocates, node_word="", chart_size=1.0):
+def render_collocate_chart(collocates, node_word="", chart_size=1.0, examples_dict=None):
     """
     Renders a radial network graph (LancsBox style).
     Center: Node word
@@ -120,12 +108,15 @@ def render_collocate_chart(collocates, node_word="", chart_size=1.0):
     Distance: Inversely proportional to Score (Closer = Stronger)
     Size: Proportional to Score
     Position: Left vs Right dominant
-    chart_size: Multiplier for figsize (default 1.0 -> 10x8)
+    chart_size: Multiplier for figsize
     """
     if not collocates:
         return
+        
+    if examples_dict is None:
+        examples_dict = {}
 
-    # POS Color Mapping (more diverse as requested)
+    # POS Color Mapping
     pos_colors = {
         'NN': '#1f77b4', 'NNS': '#aec7e8', 'NP': '#ff7f0e', 'NPS': '#ffbb78', 'NNP': '#ff7f0e', 'NNPS': '#ffbb78', # Nouns
         'JJ': '#2ca02c', 'JJR': '#98df8a', 'JJS': '#bcbd22', # Adjectives
@@ -140,7 +131,7 @@ def render_collocate_chart(collocates, node_word="", chart_size=1.0):
         'FW': '#9edae5', # Foreign Word
     }
 
-    # Extract Data & Limit
+    # Extract Data & Limit (Top 20 from whatever was passed in)
     data = collocates[:20]
     words = [c['collocate'] for c in data]
     scores = [float(c.get('score', c.get('LL', 0))) for c in data]
@@ -148,29 +139,10 @@ def render_collocate_chart(collocates, node_word="", chart_size=1.0):
     if not scores: return
     
     min_s, max_s = min(scores), max(scores)
-    # Norm function
     def get_norm(s):
         if max_s == min_s: return 1.0
         return (s - min_s) / (max_s - min_s)
 
-    # Create Figure with adjustable size
-    # We use a base DPI of 100. figsize is in inches.
-    width, height = 10 * chart_size, 8 * chart_size
-    fig, ax = plt.subplots(figsize=(width, height), dpi=100)
-    
-    # Scale fonts and markers
-    center_marker_size = 2500 * chart_size
-    bubble_min_size = 400 * chart_size
-    bubble_max_size = 1800 * chart_size
-    font_center = 12 * chart_size
-    font_label = 10 * chart_size
-    
-    # 1. Center Node
-    ax.scatter(0, 0, s=center_marker_size, c="#fdd835", edgecolors="black", linewidth=1.5, zorder=20)
-    ax.text(0, 0, node_word, ha='center', va='center', color='black', weight='bold', fontsize=font_center, zorder=21)
-    
-    # 2. Assign Directions
-    # We split into Left-Leaning and Right-Leaning groups to distribute them
     left_side = []
     right_side = []
     
@@ -185,12 +157,9 @@ def render_collocate_chart(collocates, node_word="", chart_size=1.0):
             
         # Determine Color based on POS tag
         tag = c.get('tag') or ''
-        # Use exact match or prefix if not found
         bubble_color = pos_colors.get(tag)
         if not bubble_color:
-             # Try first two letters
              bubble_color = pos_colors.get(tag[:2])
-             
         if not bubble_color:
             bubble_color = "#b0bec5" # Fallback
             
@@ -207,19 +176,14 @@ def render_collocate_chart(collocates, node_word="", chart_size=1.0):
         else:
             right_side.append(item)
             
-    # Sort by ratio (most left to neutral)
+    # Sort by ratio
     left_side.sort(key=lambda x: x['ratio'], reverse=True) 
-    # Sort by ratio (neutral to most right)
     right_side.sort(key=lambda x: x['ratio'], reverse=True)
 
-    # Distribute Angles
-    # Left: 100 degrees to 260 degrees (avoid top/bottom exact overlap)
-    # Right: -80 degrees to 80 degrees
-    
+    nodes_list = []
     def assign_coords(group, start_angle, end_angle):
         if not group: return
         count = len(group)
-        # linear space
         angles = np.linspace(np.radians(start_angle), np.radians(end_angle), count)
         
         min_dist = 0.3
@@ -232,35 +196,97 @@ def render_collocate_chart(collocates, node_word="", chart_size=1.0):
             # Distance (Inverse to score)
             r = max_dist - (norm * (max_dist - min_dist))
             
-            # Size (Proportional to score)
-            s = bubble_min_size + (norm * (bubble_max_size - bubble_min_size))
-            
-            # Size (Proportional to score)
-            s = bubble_min_size + (norm * (bubble_max_size - bubble_min_size))
-            
             x = r * np.cos(angle)
             y = r * np.sin(angle)
             
-            # Draw Line
-            ax.plot([0, x], [0, y], c="#b0bec5", linewidth=1.0, zorder=1)
-            
-            # Draw Bubble
-            ax.scatter(x, y, s=s, c=item['color'], edgecolors="black", linewidth=0.5, zorder=10)
-            
-            # Label - Black text for visibility as requested
-            ax.text(x, y, item['word'], ha='center', va='center', color='black', weight='normal', fontsize=font_label, zorder=15)
+            item['x'] = x
+            item['y'] = y
+            nodes_list.append(item)
 
-    # Assign Left (Left side of circle)
+    # Assign coordinates
     assign_coords(left_side, 100, 260)
-    
-    # Assign Right (Right side of circle)
     assign_coords(right_side, 80, -80)
 
-    # Clean up
-    ax.set_xlim(-1, 1)
-    ax.set_ylim(-1, 1)
-    ax.axis('off')
-    ax.set_aspect('equal')
+    # Build Plotly Figure
+    fig = go.Figure()
     
-    st.pyplot(fig, use_container_width=False)
-    plt.close(fig)
+    # 1. Lines trace
+    edge_x = []
+    edge_y = []
+    for node in nodes_list:
+        edge_x.extend([0, node['x'], None])
+        edge_y.extend([0, node['y'], None])
+        
+    fig.add_trace(go.Scatter(
+        x=edge_x, y=edge_y,
+        line=dict(width=1, color='#b0bec5'),
+        hoverinfo='none',
+        mode='lines'
+    ))
+    
+    # 2. Nodes trace
+    node_x = [0]
+    node_y = [0]
+    node_text = [node_word]
+    node_color = ['#fdd835']
+    node_size = [60]
+    hover_texts = [f"<b>{node_word}</b>"]
+    
+    for item in nodes_list:
+        node_x.append(item['x'])
+        node_y.append(item['y'])
+        node_text.append(item['word'])
+        node_color.append(item['color'])
+        
+        # Calculate bubble size (diameter)
+        d = 30 + item['norm'] * 40
+        node_size.append(d)
+        
+        kwic_ex = examples_dict.get(item['word'])
+        if not kwic_ex:
+            kwic_ex = "No example available."
+        else:
+            kwic_ex = str(kwic_ex).replace("&lt;s&gt;", "").replace("&lt;/s&gt;", "").strip()
+            import html, re, textwrap
+            kwic_ex = html.escape(kwic_ex)
+            
+            # Wrap text BEFORE highlighting so we don't break HTML tags in half
+            kwic_ex = "<br>".join(textwrap.wrap(kwic_ex, width=60))
+            
+            def highlight_word(text, word, color):
+                if not word: return text
+                pattern = re.compile(rf"\b({re.escape(word)})\b", flags=re.IGNORECASE)
+                return pattern.sub(rf'<span style="color:{color}"><b>\1</b></span>', text)
+                
+            kwic_ex = highlight_word(kwic_ex, node_word, "#d32f2f")
+            kwic_ex = highlight_word(kwic_ex, item['word'], "#1976d2")
+            
+        hover_texts.append(f"<span style='font-size: 14px;'><b>{item['word']}</b><br>Score: {item['score']:.2f}<br><br><i>{kwic_ex}</i></span>")
+        
+    fig.add_trace(go.Scatter(
+        x=node_x, y=node_y,
+        mode='markers+text',
+        text=node_text,
+        textposition="middle center",
+        hoverinfo='text',
+        hovertext=hover_texts,
+        marker=dict(
+            color=node_color,
+            size=node_size,
+            line=dict(width=1, color='black')
+        ),
+        textfont=dict(color='black', size=12)
+    ))
+    
+    fig.update_layout(
+        showlegend=False,
+        hovermode='closest',
+        margin=dict(b=0,l=0,r=0,t=0),
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-1.1, 1.1]),
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-1.1, 1.1]),
+        plot_bgcolor="white",
+        width=800 * chart_size,
+        height=640 * chart_size
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
