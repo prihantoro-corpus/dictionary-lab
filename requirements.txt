@@ -1,7 +1,7 @@
 streamlit
 pandas
 duckdb
-stanza
+spacy
 openpyxl
 xlsxwriter
 matplotlib
