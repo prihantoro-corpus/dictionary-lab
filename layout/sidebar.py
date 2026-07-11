@@ -108,7 +108,8 @@ def render():
         '<div style="text-align: left; margin-bottom: 10px;">'
         '<a href="https://docs.google.com/document/d/1x-arcEkxjMc_9DeBYZUcGxnrWl0JW0Bj5_N6o_Jfyfc/edit?usp=drive_link" '
         'target="_blank" style="text-decoration: none; color: #1976d2; font-size: 16px; font-weight: bold;">'
-        '📖 Manual</a>'
+        '📖 Manual</a><br/>'
+        '<span style="font-size: 12px; color: gray;">Version 110726</span>'
         '</div>',
         unsafe_allow_html=True
     )
