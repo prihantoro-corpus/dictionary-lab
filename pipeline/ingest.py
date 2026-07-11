@@ -100,6 +100,7 @@ class CorpusParser:
             root_attr_value = os.path.splitext(os.path.basename(filepath))[0]
             current_metadata = {"attribute": root_attr_value}
             
+            start_id = current_id
             current_sentence_id = 0
             current_doc_id = 0
             current_sentence_num = 0
