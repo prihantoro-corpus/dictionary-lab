@@ -330,10 +330,7 @@ class CorpusParser:
     def _bulk_insert(self, conn, data):
         try:
             values = [(d['id'], d['token'], d['tag'], d['lemma'], d['corpus'], d['metadata'], d['file_id'], d['sentence_id'], d['doc_id'], d['sentence_num']) for d in data]
-            conn.execute("CREATE TEMP TABLE IF NOT EXISTS batch_tmp AS SELECT * FROM tokens LIMIT 0")
-            conn.execute("DELETE FROM batch_tmp")
-            conn.executemany("INSERT INTO batch_tmp VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", values)
-            conn.execute("INSERT INTO tokens SELECT * FROM batch_tmp")
+            conn.executemany("INSERT INTO tokens VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", values)
         except Exception as e:
             print(f"Bulk insert failed: {e}")
             raise e
