@@ -324,14 +324,9 @@ class CorpusParser:
         print(f"Finished processing RAW {filepath}. Total tokens: {current_id - start_id}")
 
     def _bulk_insert(self, conn, data):
-        if not data: return
         try:
-            df = pd.DataFrame(data)
-            # Register the dataframe with a fixed name to avoid scoping issues in safe_execute
-            conn.register("batch_df", df)
-            safe_execute(conn, "INSERT INTO tokens (id, token, tag, lemma, corpus, metadata, file_id, sentence_id, doc_id, sentence_num) SELECT id, token, tag, lemma, corpus, metadata, file_id, sentence_id, doc_id, sentence_num FROM batch_df")
-            conn.unregister("batch_df")
+            values = [(d['id'], d['token'], d['tag'], d['lemma'], d['corpus'], d['metadata'], d['file_id'], d['sentence_id'], d['doc_id'], d['sentence_num']) for d in data]
+            conn.executemany("INSERT INTO tokens (id, token, tag, lemma, corpus, metadata, file_id, sentence_id, doc_id, sentence_num) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", values)
         except Exception as e:
             print(f"Bulk insert failed: {e}")
             raise e
-
