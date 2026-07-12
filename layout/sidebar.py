@@ -3,6 +3,7 @@ import duckdb
 import os
 import json
 import tempfile
+import time
 from pipeline.indexing import get_connection
 import math
 
@@ -293,8 +294,11 @@ def render():
                             
                             corpus_name_display = os.path.splitext(uploaded_file.name)[0]
                             try:
+                                start_time = time.time()
                                 parser.process_file(tmp_path, corpus_name_display, lang_code=st.session_state.get('corpus_language', 'English'))
+                                end_time = time.time()
                                 loaded_names.append(corpus_name_display)
+                                st.success(f"Corpus '{corpus_name_display}' successfully loaded in {end_time - start_time:.2f} seconds.")
                             except Exception as e:
                                 if "used by another process" in str(e):
                                     st.error(f"❌ Failed to load {uploaded_file.name}: Database locked by another process.")
@@ -492,8 +496,11 @@ def render():
                             disk_key = clean_to_disk[corpus_clean_name]
                             f_path = os.path.join(CORPORA_DIR, disk_corpora_map[disk_key])
                             try:
+                                start_time = time.time()
                                 parser.process_file(f_path, corpus_clean_name, lang_code=st.session_state.get('corpus_language', 'English'))
+                                end_time = time.time()
                                 loaded_names.append(corpus_clean_name)
+                                st.success(f"Corpus '{corpus_clean_name}' successfully loaded in {end_time - start_time:.2f} seconds.")
                             except Exception as e:
                                 if "used by another process" in str(e):
                                      st.error(f"❌ Failed to load {corpus_clean_name}: Database locked by another process (Try closing other python scripts).")
