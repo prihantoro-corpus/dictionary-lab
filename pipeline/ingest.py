@@ -203,7 +203,7 @@ class CorpusParser:
         current_doc_id = 0
         current_sentence_num = 0
         batch_data = []
-        batch_size = 100000
+        batch_size = 10000
 
         with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
@@ -329,8 +329,9 @@ class CorpusParser:
 
     def _bulk_insert(self, conn, data):
         try:
-            values = [(d['id'], d['token'], d['tag'], d['lemma'], d['corpus'], d['metadata'], d['file_id'], d['sentence_id'], d['doc_id'], d['sentence_num']) for d in data]
-            conn.executemany("INSERT INTO tokens VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", values)
+            import pyarrow as pa
+            arrow_table = pa.Table.from_pylist(data)
+            conn.execute("INSERT INTO tokens SELECT * FROM arrow_table")
         except Exception as e:
             print(f"Bulk insert failed: {e}")
             raise e
