@@ -12,6 +12,7 @@ class CorpusParser:
         # Regex to capture attributes: key="value" or key='value'
         self.attr_pattern = re.compile(r'(\w+)=["\']([^"\']+)["\']')
         self.tag_pattern = re.compile(r'^<.*>$')
+        self.tag_name_pattern = re.compile(r'^<(/?[a-zA-Z0-9]+)')
 
     def parse_line(self, line):
         line = line.strip()
@@ -21,13 +22,13 @@ class CorpusParser:
         # Check for metadata tag
         if line.startswith('<') and line.endswith('>'):
             # It's a tag, extract name and attributes
-            tag_name_match = re.search(r'^<(/?[a-zA-Z0-9]+)', line)
+            tag_name_match = self.tag_name_pattern.search(line)
             tag_name = tag_name_match.group(1).lower() if tag_name_match else ""
             attrs = dict(self.attr_pattern.findall(line))
             return 'metadata', (tag_name, attrs)
         else:
-            # It's a token line (split by tabs or multiple spaces)
-            parts = [p.strip() for p in re.split(r'\t+', line) if p.strip()]
+            # It's a token line (split by tabs)
+            parts = [p.strip() for p in line.split('\t') if p.strip()]
             if not parts:
                 return None, None
                 
@@ -94,13 +95,15 @@ class CorpusParser:
             current_doc_id = 0
             current_sentence_num = 0
             batch_data = []
-            batch_size = 100000
+            batch_size = 10000
+            current_metadata_json = json.dumps(current_metadata)
             
             print(f"Processing {filepath} (Vertical)...")
             
             with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
                 for line in f:
                     type_, data = self.parse_line(line)
+                    if not type_: continue
                     
                     if type_ == 'metadata':
                         tag_name, attrs = data
@@ -110,6 +113,7 @@ class CorpusParser:
                         elif tag_name.startswith('doc'):
                              current_doc_id += 1
                         current_metadata.update(attrs)
+                        current_metadata_json = json.dumps(current_metadata)
                     elif type_ == 'token':
                         current_id += 1
                         row = {
@@ -118,7 +122,7 @@ class CorpusParser:
                             'tag': data['tag'],
                             'lemma': data['lemma'],
                             'corpus': corpus_name,
-                            'metadata': json.dumps(current_metadata),
+                            'metadata': current_metadata_json,
                             'file_id': filepath,
                             'sentence_id': current_sentence_id,
                             'doc_id': current_doc_id,
