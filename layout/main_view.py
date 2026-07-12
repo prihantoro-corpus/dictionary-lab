@@ -93,19 +93,22 @@ def render_sense_editor(token, tag, initial_data, where_clause="1=1", params=())
                                 
             # Show suggestion if exists
             sugg_key = f"ai_sugg_{field_key}"
+            
+            def apply_suggestion(f_key=field_key, s_key=sugg_key):
+                st.session_state[f_key] = st.session_state[s_key]
+                del st.session_state[s_key]
+                
+            def dismiss_suggestion(s_key=sugg_key):
+                del st.session_state[s_key]
+            
             if sugg_key in st.session_state and st.session_state[sugg_key]:
                 sugg = st.session_state[sugg_key]
                 st.info(f"**Suggestion:**\n{sugg}")
                 col_a, col_b = st.columns([1, 5])
                 with col_a:
-                    if st.button("✅ Apply", key=f"apply_{field_key}"):
-                        st.session_state[field_key] = sugg
-                        del st.session_state[sugg_key]
-                        st.rerun()
+                    st.button("✅ Apply", key=f"apply_{field_key}", on_click=apply_suggestion)
                 with col_b:
-                    if st.button("❌ Dismiss", key=f"dimiss_{field_key}"):
-                        del st.session_state[sugg_key]
-                        st.rerun()
+                    st.button("❌ Dismiss", key=f"dimiss_{field_key}", on_click=dismiss_suggestion)
                         
             return result
 
