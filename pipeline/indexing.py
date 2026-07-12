@@ -52,6 +52,7 @@ def get_connection(read_only=False, allow_fallback=True):
             # Use safe execute for setting config (might fail on RO connection in some versions, but usually fine)
             try:
                 st.session_state.duckdb_conn.execute("SET preserve_insertion_order=false")
+                st.session_state.duckdb_conn.execute("PRAGMA memory_limit='512MB'")
             except:
                 pass
                 
