@@ -7,7 +7,7 @@ def autocomplete(prefix, where_clause="1=1", params=(), limit=10):
     res = safe_execute(conn, query, (f"{prefix}%", *params, limit)).fetchall()
     if not is_shared:
         conn.close()
-    return [r[0] for r in res]
+    return [str(r[0]) for r in res if r[0] is not None]
 
 def search_exact(token, where_clause="1=1", params=()):
     conn, is_shared = get_connection()
@@ -20,7 +20,7 @@ def search_exact(token, where_clause="1=1", params=()):
 def search_fuzzy(token, limit=5):
     conn, is_shared = get_connection()
     all_tokens_res = safe_execute(conn, "SELECT DISTINCT token FROM tokens").fetchall()
-    all_tokens = [r[0] for r in all_tokens_res]
+    all_tokens = [str(r[0]) for r in all_tokens_res if r[0] is not None]
     if not is_shared:
         conn.close()
     
@@ -56,7 +56,7 @@ def get_forms_by_lemma(lemma):
     res = safe_execute(conn, "SELECT DISTINCT LOWER(token) FROM tokens WHERE lemma ILIKE ?", (lemma,)).fetchall()
     if not is_shared:
         conn.close()
-    return [r[0] for r in res]
+    return [str(r[0]) for r in res if r[0] is not None]
 
 def get_pos_tags(token):
     """Returns all unique POS tags for this token."""
@@ -73,7 +73,7 @@ def get_related_words(token, limit=20):
     res = safe_execute(conn, query, (f"%{token}%", token, limit)).fetchall()
     if not is_shared:
         conn.close()
-    return [r[0] for r in res]
+    return [str(r[0]) for r in res if r[0] is not None]
 
 def get_corpus_stats(where_clause="1=1", params=()):
     """Returns basic stats for the Entry tab."""
