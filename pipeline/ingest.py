@@ -49,21 +49,21 @@ class CorpusParser:
         try:
             # 1. Detect Format
             is_vertical = True
-            with open(filepath, 'r', encoding='utf-8', errors='replace') as test_f:
-                # Check first few non-empty lines for tabs
-                lines_checked = 0
-                for line in test_f:
-                    stripped = line.strip()
-                    if stripped:
-                        # A vertical tag should be just the tag, e.g., <doc id="1">
-                        # Lines like <u ...>text</u> have the first '>' not at the end.
-                        is_single_tag = stripped.startswith('<') and stripped.endswith('>') and stripped.find('>') == len(stripped) - 1
-                        if '\t' not in stripped and not is_single_tag:
-                            # Found a line that is NOT a tag and has NO tabs -> likely raw text
-                            is_vertical = False
-                            break
-                        lines_checked += 1
-                        if lines_checked > 10: break
+            if filepath.endswith('.xml') or filepath.endswith('.vert') or filepath.endswith('.vrt'):
+                is_vertical = True
+            else:
+                with open(filepath, 'r', encoding='utf-8', errors='replace') as test_f:
+                    # Check first few non-empty lines for tabs
+                    lines_checked = 0
+                    for line in test_f:
+                        stripped = line.strip()
+                        if stripped:
+                            is_single_tag = stripped.startswith('<') and stripped.endswith('>') and stripped.find('>') == len(stripped) - 1
+                            if '\t' not in stripped and not is_single_tag:
+                                is_vertical = False
+                                break
+                            lines_checked += 1
+                            if lines_checked > 10: break
             
             if not is_vertical:
                 if progress_callback: progress_callback(0.01, f"Initializing SpaCy for {lang_code}...")
@@ -94,7 +94,7 @@ class CorpusParser:
             current_doc_id = 0
             current_sentence_num = 0
             batch_data = []
-            batch_size = 10000
+            batch_size = 100000
             
             print(f"Processing {filepath} (Vertical)...")
             
@@ -199,7 +199,7 @@ class CorpusParser:
         current_doc_id = 0
         current_sentence_num = 0
         batch_data = []
-        batch_size = 10000
+        batch_size = 100000
 
         with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
