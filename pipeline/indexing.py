@@ -53,6 +53,7 @@ def get_connection(read_only=False, allow_fallback=True):
             try:
                 st.session_state.duckdb_conn.execute("SET preserve_insertion_order=false")
                 st.session_state.duckdb_conn.execute("PRAGMA memory_limit='256MB'")
+                st.session_state.duckdb_conn.execute("PRAGMA threads=1")
             except:
                 pass
                 
