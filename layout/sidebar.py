@@ -235,7 +235,8 @@ def render():
                                 from pipeline.online_corpus import build_online_corpus
                                 params = {
                                     'keywords': st.session_state['online_keywords'],
-                                    'max_results': st.session_state['online_max_links']
+                                    'max_results': st.session_state['online_max_links'],
+                                    'language': st.session_state.get('corpus_language', 'English')
                                 }
                                 links, _ = build_online_corpus("keyword_fetch", params)
                                 if links:

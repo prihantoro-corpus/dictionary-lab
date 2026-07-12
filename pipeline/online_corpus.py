@@ -131,30 +131,66 @@ class OnlineCorpusBuilder:
         except Exception as e:
             print(f"Scrape error for {url}: {e}")
         return None
-
-    def fetch_keyword_links(self, keywords):
-        links = []
-        try:
-            from ddgs import DDGS
-            query = " ".join(keywords)
-            with DDGS() as ddgs:
-                results = [r for r in ddgs.text(query, max_results=50)]
-                for r in results:
-                    if 'href' in r:
-                        links.append(r['href'])
-        except Exception as e:
-            print(f"Search error: {e}")
-            
-        # Filter links by URL containing at least one keyword (ignore very short keywords)
-        filtered_links = []
-        for link in links:
-            if any(kw.lower() in link.lower() for kw in keywords if len(kw) > 2):
-                filtered_links.append(link)
+    def fetch_keyword_links(self, keywords, num_links=25, language=None, progress_callback=None):
+        import xml.etree.ElementTree as ET
+        import urllib.parse
+        import time
+        
+        query = " ".join(keywords)
+        
+        # Build language params for Bing News
+        lang_param = "&mkt=en-US"
+        if language:
+            if language.lower() == "indonesian":
+                lang_param = "&mkt=id-ID"
+            elif language.lower() == "english":
+                lang_param = "&mkt=en-US"
                 
-        # Fallback if filtering removes everything
-        if not filtered_links:
-            filtered_links = links
+        links = set()
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        
+        # Bing News RSS returns ~10 links per page. Paginate to get up to num_links.
+        page = 0
+        while len(links) < num_links and page < 10:  # Max 10 pages
+            first_param = f"&first={page * 10 + 1}" if page > 0 else ""
+            url = f"https://www.bing.com/news/search?q={query}&format=rss{lang_param}{first_param}"
             
+            try:
+                if progress_callback: 
+                    progress_callback((page + 1) / 10.0, f"Searching Bing News (Page {page + 1})...")
+                    
+                resp = requests.get(url, headers=headers, timeout=10)
+                if resp.status_code == 200:
+                    root = ET.fromstring(resp.content)
+                    items = root.findall('.//item')
+                    
+                    if not items:
+                        break # No more results
+                        
+                    for item in items:
+                        link = item.find('link').text
+                        if link:
+                            # Extract the actual URL from Bing's redirect link
+                            parsed = urllib.parse.urlparse(link)
+                            qs = urllib.parse.parse_qs(parsed.query)
+                            if 'url' in qs:
+                                clean_url = qs['url'][0]
+                                links.add(clean_url)
+                            elif 'bing.com' not in link:
+                                links.add(link)
+                else:
+                    break # Stop on error
+            except Exception as e:
+                print(f"RSS Search error: {e}")
+                break
+                
+            page += 1
+            time.sleep(1) # Be nice to Bing
+            
+        # Return exactly the number of links requested
+        
+        filtered_links = list(links)[:num_links]
+        
         # Prioritize easy-to-scrape websites and penalize hard ones
         hard_domains = ['scribd', 'yumpu', 'academia', 'researchgate', 'facebook', 'twitter', 'instagram', 'tiktok', 'x.com', 'pinterest']
         easy_domains = ['wikipedia', 'medium', 'blogspot', 'wordpress', 'kompas', 'detik', 'tribunnews', 'bbc', 'cnn', 'tempo', 'kumparan', 'suara']
@@ -237,8 +273,9 @@ def build_online_corpus(mode_type, params, progress_callback=None):
     
     elif mode_type == "keyword_fetch":
         keywords = params.get('keywords', [])
-        if progress_callback: progress_callback(0.1, "Searching for links...")
-        return builder.fetch_keyword_links(keywords), None
+        num_links = params.get('max_results', 25)
+        language = params.get('language', 'English')
+        return builder.fetch_keyword_links(keywords, num_links, language, progress_callback), None
 
     elif mode_type == "keyword_scrape":
         keywords = params.get('keywords', [])
