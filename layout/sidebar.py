@@ -190,9 +190,10 @@ def render():
 
             elif st.session_state['corpus_selection_mode'] == "Built-in Corpora":
                 disk_corpora_map = get_disk_corpora()
-                available_corpora = sorted([clean_name(c) for c in disk_corpora_map.keys()])
+                db_corpora = get_corpora()
+                available_corpora = sorted(list(set([clean_name(c) for c in disk_corpora_map.keys()] + db_corpora)))
                 if not available_corpora:
-                    st.warning("No built-in corpora found.")
+                    st.warning("No built-in or indexed corpora found.")
                     st.session_state['staged_parallel'] = None
                 else:
                     if not is_parallel:
@@ -311,6 +312,7 @@ def render():
                 disk_corpora_map = get_disk_corpora()
                 clean_to_disk = {clean_name(k): k for k in disk_corpora_map.keys()}
                 
+                db_corpora = get_corpora()
                 def load_parallel_unit(selection, label):
                    if isinstance(selection, str):
                        # Built-in logic
@@ -318,6 +320,8 @@ def render():
                            disk_key = clean_to_disk[selection]
                            f_path = os.path.join(CORPORA_DIR, disk_corpora_map[disk_key])
                            parser.process_file(f_path, selection, lang_code=st.session_state.get('corpus_language') if label == "SRC" else st.session_state.get('target_language'))
+                           return selection
+                       elif selection in db_corpora:
                            return selection
                        return None
                    else:
@@ -478,6 +482,7 @@ def render():
                 
                 # Create reverse mapping: clean_name -> disk_key
                 clean_to_disk = {clean_name(k): k for k in disk_corpora_map.keys()}
+                db_corpora = get_corpora()
                 
                 for corpus_clean_name in st.session_state['staged_builtin']:
                     with st.spinner(f"Loading {corpus_clean_name}..."):
@@ -492,6 +497,8 @@ def render():
                                      st.error(f"❌ Failed to load {corpus_clean_name}: Database locked by another process (Try closing other python scripts).")
                                 else:
                                      st.error(f"❌ Failed to load {corpus_clean_name}: {e}")
+                        elif corpus_clean_name in db_corpora:
+                            loaded_names.append(corpus_clean_name)
             
             # Activate loaded corpora immediately
             if loaded_names:
