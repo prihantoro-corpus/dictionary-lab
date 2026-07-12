@@ -20,4 +20,5 @@ test_raw_sentence.txt
 test_root_tag.txt
 
 *.duckdb
+!bawe.duckdb
 *.duckdb.wal

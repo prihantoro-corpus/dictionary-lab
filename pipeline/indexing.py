@@ -4,6 +4,8 @@ import os
 import time
 
 DB_PATH = "dictionary.duckdb"
+if not os.path.exists(DB_PATH) and os.path.exists("bawe.duckdb"):
+    DB_PATH = "bawe.duckdb"
 
 def _connect_with_retry(path, read_only=False, retries=5):
     """Internal helper to connect with retries for locked DB."""
