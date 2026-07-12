@@ -5,14 +5,7 @@ import json
 import os
 from .indexing import get_connection, safe_execute
 
-try:
-    from add_indexes import drop_indexes, add_indexes
-except ImportError:
-    # Fallback if root is not in sys.path
-    import sys
-    import os
-    sys.path.append(os.getcwd())
-    from add_indexes import drop_indexes, add_indexes
+
 
 class CorpusParser:
     def __init__(self):
@@ -79,10 +72,6 @@ class CorpusParser:
                 return
 
             # --- EXISTING VERTICAL PROCESSING ---
-            # Drop indexes to speed up DELETE and INSERT
-            drop_indexes(conn)
-
-            # Idempotency: Remove existing data for this corpus name if it exists
             print(f"Clearing existing data for corpus '{corpus_name}'...")
             safe_execute(conn, "DELETE FROM tokens WHERE corpus = ?", (corpus_name,))
             
@@ -144,10 +133,6 @@ class CorpusParser:
             if batch_data:
                 self._bulk_insert(conn, batch_data)
             
-            # Recreate indexes after ingestion
-            print(f"Recreating indexes for corpus '{corpus_name}'...")
-            add_indexes(conn)
-
             print(f"Finished processing {filepath}. Total tokens: {current_id - start_id}")
         except Exception as e:
             print(f"CRITICAL ERROR during ingestion: {e}")
@@ -193,8 +178,6 @@ class CorpusParser:
                 print(f"Failed to load SpaCy model {spacy_model}: {e}. Falling back to whitespace.")
                 nlp = None
 
-        # Drop indexes
-        drop_indexes(conn)
         
         # Clear existing
         print(f"Clearing existing data for corpus '{corpus_name}'...")
@@ -338,8 +321,6 @@ class CorpusParser:
         if batch_data:
             self._bulk_insert(conn, batch_data)
         
-        print(f"Recreating indexes for corpus '{corpus_name}'...")
-        add_indexes(conn)
         print(f"Finished processing RAW {filepath}. Total tokens: {current_id - start_id}")
 
     def _bulk_insert(self, conn, data):

@@ -108,20 +108,26 @@ def init_db(conn=None):
     # Check if Read-Only: Try a dummy write or check config. 
     # Actually, simpler: Try creating table. If fails due to Read-Only, ignore it (assume DB exists).
     try:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS tokens (
-                id BIGINT,
-                token VARCHAR,
-                tag VARCHAR,
-                lemma VARCHAR,
-                corpus VARCHAR,
-                metadata JSON,
-                file_id VARCHAR,
-                sentence_id BIGINT,
-                doc_id BIGINT,
-                sentence_num BIGINT
-            );
+        # Create main tokens table
+        safe_execute(conn, """
+        CREATE TABLE IF NOT EXISTS tokens (
+            id BIGINT,
+            token VARCHAR,
+            tag VARCHAR,
+            lemma VARCHAR,
+            corpus VARCHAR,
+            metadata JSON,
+            file_id VARCHAR,
+            sentence_id BIGINT,
+            doc_id BIGINT,
+            sentence_num BIGINT
+        )
         """)
+        
+        # Ensure indexes exist
+        safe_execute(conn, "CREATE INDEX IF NOT EXISTS idx_tokens_token ON tokens (token)")
+        safe_execute(conn, "CREATE INDEX IF NOT EXISTS idx_tokens_corpus ON tokens (corpus)")
+        safe_execute(conn, "CREATE INDEX IF NOT EXISTS idx_tokens_file_id_id ON tokens (file_id, id)")
     except Exception as e:
         if "read-only" in str(e).lower() or "transaction" in str(e).lower():
             print("Skipping table creation (Read-Only mode).")
