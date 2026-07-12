@@ -14,16 +14,14 @@ CORPORA_DIR = os.path.join(os.getcwd(), "corpora")
 
 @st.cache_data
 def get_corpora():
-    """Returns list of corpora names already indexed in DuckDB."""
-    conn, is_shared = get_connection()
-    try:
-        res = conn.execute("SELECT DISTINCT corpus FROM tokens ORDER BY corpus").fetchall()
-        return [r[0] for r in res if r[0]]
-    except Exception:
+    """Returns list of corpora names already indexed as .duckdb files."""
+    if not os.path.exists(CORPORA_DIR):
         return []
-    finally:
-        if not is_shared:
-            conn.close()
+    corpora = []
+    for f in os.listdir(CORPORA_DIR):
+        if f.endswith('.duckdb'):
+            corpora.append(os.path.splitext(f)[0])
+    return sorted(corpora)
 
 def get_disk_corpora():
     """Returns a dictionary of {corpus_name: filename} from the relative corpora/ folder."""
@@ -513,6 +511,11 @@ def render():
                 st.session_state['loaded_corpora'] = list(set(current_loaded + loaded_names))
                 st.session_state['last_selection'] = st.session_state['loaded_corpora']
                 
+                # Re-attach databases to the active memory connection
+                from pipeline.indexing import get_connection, attach_corpora
+                conn, _ = get_connection()
+                attach_corpora(conn, st.session_state['loaded_corpora'])
+                
                 # Clear staged items
                 st.session_state['staged_files'] = []
                 st.session_state['staged_builtin'] = []
@@ -636,17 +639,32 @@ def render():
         
         st.sidebar.divider()
         if st.sidebar.button("🗑️ Clear All Corpus Data", help="Delete all tokens from the database."):
-            conn, is_shared = get_connection()
             try:
-                conn.execute("DELETE FROM tokens")
+                # Close memory connection first so Windows releases file handles
+                if 'duckdb_conn' in st.session_state:
+                    try:
+                        st.session_state.duckdb_conn.close()
+                    except: pass
+                    del st.session_state['duckdb_conn']
+                
+                if os.path.exists(CORPORA_DIR):
+                    for f in os.listdir(CORPORA_DIR):
+                        if f.endswith('.duckdb') or f.endswith('.duckdb.wal'):
+                            try: os.remove(os.path.join(CORPORA_DIR, f))
+                            except: pass
+                
+                # Re-initialize empty memory view
+                from pipeline.indexing import get_connection, attach_corpora
+                conn, _ = get_connection()
+                attach_corpora(conn, [])
+                
                 st.sidebar.warning("Database cleared!")
                 st.session_state['loaded_corpora'] = []
                 st.session_state['last_selection'] = []
                 st.cache_data.clear()
                 st.rerun()
-            finally:
-                if not is_shared:
-                    conn.close()
+            except Exception as e:
+                st.sidebar.error(f"Error clearing: {e}")
 
     # --- Active Search & Filtering ---
     st.sidebar.divider()

@@ -3,9 +3,7 @@ import duckdb
 import os
 import time
 
-DB_PATH = "dictionary.duckdb"
-if not os.path.exists(DB_PATH) and os.path.exists("bawe.duckdb"):
-    DB_PATH = "bawe.duckdb"
+CORPORA_DIR = os.path.join(os.getcwd(), "corpora")
 
 def _connect_with_retry(path, read_only=False, retries=5):
     """Internal helper to connect with retries for locked DB."""
@@ -24,32 +22,83 @@ def _connect_with_retry(path, read_only=False, retries=5):
                 continue
             raise e
 
+def attach_corpora(conn, corpora_names):
+    """
+    Attaches multiple corpus .duckdb files to the given connection
+    and builds a unified `tokens` view.
+    """
+    if not corpora_names:
+        # Create an empty view so queries don't crash when no corpus is loaded
+        conn.execute("""
+            CREATE OR REPLACE VIEW tokens AS 
+            SELECT CAST(NULL AS BIGINT) as id, 
+                   CAST(NULL AS VARCHAR) as token, 
+                   CAST(NULL AS VARCHAR) as tag, 
+                   CAST(NULL AS VARCHAR) as lemma, 
+                   CAST(NULL AS VARCHAR) as corpus, 
+                   CAST(NULL AS JSON) as metadata, 
+                   CAST(NULL AS VARCHAR) as file_id, 
+                   CAST(NULL AS BIGINT) as sentence_id, 
+                   CAST(NULL AS BIGINT) as doc_id, 
+                   CAST(NULL AS BIGINT) as sentence_num 
+            WHERE 1=0
+        """)
+        return
+
+    union_queries = []
+    
+    # Detach any existing databases first (to allow hot-swapping)
+    try:
+        dbs = conn.execute("SELECT database_name FROM duckdb_databases() WHERE database_name NOT IN ('memory', 'system')").fetchall()
+        for db in dbs:
+            conn.execute(f"DETACH {db[0]}")
+    except:
+        pass
+
+    for corpus in corpora_names:
+        # Clean up corpus name to be a valid identifier
+        safe_alias = corpus.replace('-', '_').replace(' ', '_').replace('.', '_')
+        db_file = os.path.join(CORPORA_DIR, f"{corpus}.duckdb")
+        if os.path.exists(db_file):
+            try:
+                # Attach the database in read-only mode for querying
+                conn.execute(f"ATTACH '{db_file}' AS {safe_alias} (READ_ONLY)")
+                union_queries.append(f'SELECT * FROM {safe_alias}.tokens')
+            except Exception as e:
+                print(f"Failed to attach {db_file}: {e}")
+
+    if union_queries:
+        # Create a unified view
+        full_query = "CREATE OR REPLACE VIEW tokens AS " + " UNION ALL ".join(union_queries)
+        conn.execute(full_query)
+    else:
+        # Empty fallback
+        attach_corpora(conn, [])
+
 def get_connection(read_only=False, allow_fallback=True):
     """
     Returns (conn, is_shared). 
-    In Streamlit, attempts to use st.session_state for a persistent connection.
-    read_only: Prefer read-only connection.
-    allow_fallback: If True, allows falling back to Read-Only if Write fails (useful for startup).
-                    If False, raises Error if requested mode cannot be satisfied (useful for Ingestion).
+    In Streamlit, maintains an in-memory DB connection in session state.
     """
     try:
         # Check if we are in a Streamlit context
         if 'duckdb_conn' not in st.session_state:
-            # First time: try to connect. If locked, maybe it's another session/process.
-            # We try read-only first if that's what's requested, or read-write if it's the main session.
             try:
-                st.session_state.duckdb_conn = _connect_with_retry(DB_PATH, read_only=read_only)
+                # Use in-memory DB for the global connection
+                st.session_state.duckdb_conn = duckdb.connect(':memory:')
+                
+                try:
+                    st.session_state.duckdb_conn.execute("INSTALL json; LOAD json;")
+                except:
+                    pass
+                
+                # Attach currently loaded corpora
+                loaded = st.session_state.get('loaded_corpora', [])
+                attach_corpora(st.session_state.duckdb_conn, loaded)
+                
             except Exception as e:
-                if allow_fallback and not read_only and "used by another process" in str(e):
-                     print("Database locked. Falling back to Read-Only mode.")
-                     # Show warning only if in Streamlit context
-                     if hasattr(st, 'warning'):
-                         st.warning("⚠️ Database is locked by another process. Running in READ-ONLY mode.")
-                     st.session_state.duckdb_conn = _connect_with_retry(DB_PATH, read_only=True)
-                else:
-                    raise e
+                raise e
             
-            # Use safe execute for setting config (might fail on RO connection in some versions, but usually fine)
             try:
                 st.session_state.duckdb_conn.execute("SET preserve_insertion_order=false")
                 st.session_state.duckdb_conn.execute("PRAGMA memory_limit='512MB'")
@@ -60,15 +109,12 @@ def get_connection(read_only=False, allow_fallback=True):
         return st.session_state.duckdb_conn, True
         
     except (st.errors.StreamlitAPIException, Exception):
-        # Fallback for background scripts or if session_state fails
+        # Fallback for background scripts
+        conn = duckdb.connect(':memory:')
         try:
-            conn = _connect_with_retry(DB_PATH, read_only=read_only)
-        except Exception as e:
-            if allow_fallback and not read_only and "used by another process" in str(e):
-                print("Database locked. Background script falling back to Read-Only mode.")
-                conn = _connect_with_retry(DB_PATH, read_only=True)
-            else:
-                raise e
+            conn.execute("INSTALL json; LOAD json;")
+        except:
+            pass
         return conn, False
 
 def safe_execute(conn, query, params=(), retries=3):
@@ -90,57 +136,12 @@ def safe_execute(conn, query, params=(), retries=3):
                 if i < retries - 1:
                     time.sleep(1 * (i + 1))
                     continue
-            # Raise immediately if it's a read-only error on a write query
-            if "Cannot write to read-only database" in msg:
-                 raise e
             raise e
 
 def init_db(conn=None):
-    """Initializes the database schema."""
-    close_conn = False
-    if conn is None:
-        try:
-            conn, is_shared = get_connection()
-            close_conn = not is_shared
-        except Exception as e:
-            print(f"Failed to connect for init_db: {e}")
-            return
-    
-    # Check if Read-Only: Try a dummy write or check config. 
-    # Actually, simpler: Try creating table. If fails due to Read-Only, ignore it (assume DB exists).
-    try:
-        # Create main tokens table
-        safe_execute(conn, """
-        CREATE TABLE IF NOT EXISTS tokens (
-            id BIGINT,
-            token VARCHAR,
-            tag VARCHAR,
-            lemma VARCHAR,
-            corpus VARCHAR,
-            metadata JSON,
-            file_id VARCHAR,
-            sentence_id BIGINT,
-            doc_id BIGINT,
-            sentence_num BIGINT
-        )
-        """)
-        
-        # Ensure indexes exist
-        safe_execute(conn, "CREATE INDEX IF NOT EXISTS idx_tokens_token ON tokens (token)")
-        safe_execute(conn, "CREATE INDEX IF NOT EXISTS idx_tokens_corpus ON tokens (corpus)")
-        safe_execute(conn, "CREATE INDEX IF NOT EXISTS idx_tokens_file_id_id ON tokens (file_id, id)")
-    except Exception as e:
-        if "read-only" in str(e).lower() or "transaction" in str(e).lower():
-            print("Skipping table creation (Read-Only mode).")
-        else:
-            raise e
-    
-    if close_conn:
-        conn.close()
+    """Legacy init_db. Now handled individually by CorpusParser in ingest.py"""
+    pass
 
 def reset_db():
-    try:
-        os.remove(DB_PATH)
-    except FileNotFoundError:
-        pass
-    init_db()
+    """Legacy reset_db. Deletions handled in sidebar.py"""
+    pass

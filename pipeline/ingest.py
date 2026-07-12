@@ -3,7 +3,7 @@ import duckdb
 import pandas as pd
 import json
 import os
-from .indexing import get_connection, safe_execute
+from .indexing import safe_execute
 
 
 
@@ -46,7 +46,26 @@ class CorpusParser:
         self.process_file(filepath, corpus_name)
 
     def process_file(self, filepath, corpus_name, lang_code=None, progress_callback=None):
-        conn, is_shared = get_connection(allow_fallback=False)
+        db_file = os.path.join(os.getcwd(), "corpora", f"{corpus_name}.duckdb")
+        os.makedirs(os.path.dirname(db_file), exist_ok=True)
+        conn = duckdb.connect(db_file)
+        
+        # Initialize Schema
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS tokens (
+            id BIGINT,
+            token VARCHAR,
+            tag VARCHAR,
+            lemma VARCHAR,
+            corpus VARCHAR,
+            metadata JSON,
+            file_id VARCHAR,
+            sentence_id BIGINT,
+            doc_id BIGINT,
+            sentence_num BIGINT
+        )
+        """)
+        
         try:
             # 1. Detect Format
             is_vertical = True
@@ -142,8 +161,13 @@ class CorpusParser:
             print(f"CRITICAL ERROR during ingestion: {e}")
             raise e
         finally:
-            if not is_shared:
-                conn.close()
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_tokens_token ON tokens (token)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_tokens_corpus ON tokens (corpus)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_tokens_file_id_id ON tokens (file_id, id)")
+            except:
+                pass
+            conn.close()
 
     def process_raw_text(self, filepath, corpus_name, lang_code, conn, progress_callback=None):
         import spacy
