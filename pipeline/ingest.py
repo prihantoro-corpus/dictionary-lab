@@ -105,7 +105,7 @@ class CorpusParser:
             current_doc_id = 0
             current_sentence_num = 0
             batch_data = []
-            batch_size = 50000
+            batch_size = 10000
             
             print(f"Processing {filepath} (Vertical)...")
             
@@ -216,7 +216,7 @@ class CorpusParser:
         current_doc_id = 0
         current_sentence_num = 0
         batch_data = []
-        batch_size = 50000
+        batch_size = 10000
 
         with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()

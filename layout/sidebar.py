@@ -316,12 +316,12 @@ def render():
                 def load_parallel_unit(selection, label):
                    if isinstance(selection, str):
                        # Built-in logic
-                       if selection in clean_to_disk:
+                       if selection in db_corpora:
+                           return selection
+                       elif selection in clean_to_disk:
                            disk_key = clean_to_disk[selection]
                            f_path = os.path.join(CORPORA_DIR, disk_corpora_map[disk_key])
                            parser.process_file(f_path, selection, lang_code=st.session_state.get('corpus_language') if label == "SRC" else st.session_state.get('target_language'))
-                           return selection
-                       elif selection in db_corpora:
                            return selection
                        return None
                    else:
@@ -486,7 +486,9 @@ def render():
                 
                 for corpus_clean_name in st.session_state['staged_builtin']:
                     with st.spinner(f"Loading {corpus_clean_name}..."):
-                        if corpus_clean_name in clean_to_disk:
+                        if corpus_clean_name in db_corpora:
+                            loaded_names.append(corpus_clean_name)
+                        elif corpus_clean_name in clean_to_disk:
                             disk_key = clean_to_disk[corpus_clean_name]
                             f_path = os.path.join(CORPORA_DIR, disk_corpora_map[disk_key])
                             try:
@@ -497,8 +499,6 @@ def render():
                                      st.error(f"❌ Failed to load {corpus_clean_name}: Database locked by another process (Try closing other python scripts).")
                                 else:
                                      st.error(f"❌ Failed to load {corpus_clean_name}: {e}")
-                        elif corpus_clean_name in db_corpora:
-                            loaded_names.append(corpus_clean_name)
             
             # Activate loaded corpora immediately
             if loaded_names:
