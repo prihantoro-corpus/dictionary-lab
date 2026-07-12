@@ -62,9 +62,9 @@ def render_sense_editor(token, tag, initial_data, where_clause="1=1", params=())
         def render_ai_field(label, value, field_key, ai_method_name, is_area=False, placeholder="", extra_args=None):
             if extra_args is None: extra_args = {}
             
-            # Use session state as the source of truth if it exists, otherwise use value
-            current_val = st.session_state.get(field_key, value)
-            
+            if field_key not in st.session_state:
+                st.session_state[field_key] = value
+                
             if ai_helper and ai_method_name:
                 col1, col2 = st.columns([5, 1], vertical_alignment="bottom")
             else:
@@ -72,9 +72,9 @@ def render_sense_editor(token, tag, initial_data, where_clause="1=1", params=())
                 
             with col1:
                 if is_area:
-                    result = st.text_area(label, value=current_val, placeholder=placeholder, key=field_key)
+                    result = st.text_area(label, placeholder=placeholder, key=field_key)
                 else:
-                    result = st.text_input(label, value=current_val, placeholder=placeholder, key=field_key)
+                    result = st.text_input(label, placeholder=placeholder, key=field_key)
             
             if ai_helper and ai_method_name:
                 with col2:
@@ -112,9 +112,18 @@ def render_sense_editor(token, tag, initial_data, where_clause="1=1", params=())
                         
             return result
 
-        new_tag = st.text_input("POS Tag / Label", value=st.session_state.get(f"val_tag_{token}_{tag}", tag), key=f"val_tag_{token}_{tag}")
+        tag_key = f"val_tag_{token}_{tag}"
+        if tag_key not in st.session_state:
+            st.session_state[tag_key] = tag
+        new_tag = st.text_input("POS Tag / Label", key=tag_key)
+        
         new_pron = render_ai_field("Pronunciation", initial_data.get('pronunciation', ''), f"edit_pron_{token}_{tag}", "generate_pronunciation")
-        new_freq = st.number_input("Frequency", value=int(initial_data.get('frequency', 0)), key=f"edit_freq_{token}_{tag}")
+        
+        freq_key = f"edit_freq_{token}_{tag}"
+        if freq_key not in st.session_state:
+            st.session_state[freq_key] = int(initial_data.get('frequency', 0))
+        new_freq = st.number_input("Frequency", key=freq_key)
+        
         new_def = render_ai_field("Definition", initial_data.get('definition', ''), f"edit_def_{token}_{tag}", "generate_definition", is_area=True)
         
         st.write("---")
