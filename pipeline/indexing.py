@@ -55,6 +55,7 @@ def attach_corpora(conn, corpora_names):
     except:
         pass
 
+    attached_files = set()
     for corpus in corpora_names:
         # Clean up corpus name to be a valid identifier
         safe_alias = corpus.replace('-', '_').replace(' ', '_').replace('.', '_')
@@ -66,6 +67,12 @@ def attach_corpora(conn, corpora_names):
                 
         if os.path.exists(db_file):
             try:
+                # Resolve real path in lowercase to prevent duplicate attachment of the same physical file on Windows
+                real_path = os.path.realpath(db_file).lower()
+                if real_path in attached_files:
+                    continue
+                attached_files.add(real_path)
+                
                 # Attach the database in read-only mode for querying
                 conn.execute(f"ATTACH '{db_file}' AS {safe_alias} (READ_ONLY)")
                 union_queries.append(f'SELECT * FROM {safe_alias}.tokens')
