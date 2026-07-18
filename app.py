@@ -25,16 +25,25 @@ def main():
         st.success(st.session_state['corpus_loaded_success_msg'])
         del st.session_state['corpus_loaded_success_msg']
         
-    # Render Main View
-    # Pass the entire filters dict or unpack
-    main_view.render(
-        where_clause=filters['where_clause'], 
-        params=filters['params'],
-        stop_words=filters['stop_words'],
-        collocate_filter=filters['collocate_filter'],
-        skip_punct=filters.get('skip_punct', True),
-        no_corpora=filters.get('no_corpora', False)
-    )
+    import time
+    start_render = time.time()
+    
+    with st.spinner("Crunching data and rendering interface... (This may take a few minutes for very large corpora)"):
+        # Render Main View
+        main_view.render(
+            where_clause=filters['where_clause'], 
+            params=filters['params'],
+            stop_words=filters['stop_words'],
+            collocate_filter=filters['collocate_filter'],
+            skip_punct=filters.get('skip_punct', True),
+            no_corpora=filters.get('no_corpora', False)
+        )
+        
+    end_render = time.time()
+    duration = end_render - start_render
+    
+    if duration > 1.0:
+        st.toast(f"Interface rendered in {duration:.2f} seconds", icon="⏱️")
 
 if __name__ == "__main__":
     main()
