@@ -375,6 +375,7 @@ def render_profiler_tab(where_clause, params):
 
 def render_entry_tab(where_clause, params):
     st.title("Corpus Statistic")
+    st.info("ℹ️ **NLP Engine:** Part-of-Speech (POS) tagging and lemmatisation for raw text processing are performed using lightweight **SpaCy** language models. For low-resource languages (e.g., Javanese), no actual tagger is used and tags default to 'NA'. Pre-tagged built-in corpora retain their original tags.")
     
     # 1. Stats
     stats = search.get_corpus_stats(where_clause, params)

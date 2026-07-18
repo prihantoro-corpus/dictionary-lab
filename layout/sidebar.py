@@ -15,12 +15,22 @@ CORPORA_DIR = os.path.join(os.getcwd(), "corpora")
 @st.cache_data
 def get_corpora():
     """Returns list of corpora names already indexed as .duckdb files."""
-    if not os.path.exists(CORPORA_DIR):
-        return []
     corpora = []
-    for f in os.listdir(CORPORA_DIR):
-        if f.endswith('.duckdb'):
-            corpora.append(os.path.splitext(f)[0])
+    
+    # 1. Search corpora directory
+    if os.path.exists(CORPORA_DIR):
+        for f in os.listdir(CORPORA_DIR):
+            if f.endswith('.duckdb'):
+                corpora.append(os.path.splitext(f)[0])
+                
+    # 2. Search root directory (for explicitly tracked large corpora like bawe.duckdb)
+    root_dir = os.getcwd()
+    for f in os.listdir(root_dir):
+        if f.endswith('.duckdb') and f != 'dictionary.duckdb' and not f.startswith('test'):
+            name = os.path.splitext(f)[0]
+            if name not in corpora:
+                corpora.append(name)
+                
     return sorted(corpora)
 
 def get_disk_corpora():
@@ -158,17 +168,17 @@ def render():
                 st.caption("Select Source Language:")
                 st.session_state['corpus_language'] = st.selectbox(
                     "Source Language", 
-                    ['English', 'Indonesian', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'], 
-                    index=['English', 'Indonesian', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'].index(st.session_state.get('corpus_language', 'English')) if st.session_state.get('corpus_language', 'English') in ['English', 'Indonesian', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'] else 7,
+                    ['English', 'Indonesian', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'], 
+                    index=['English', 'Indonesian', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'].index(st.session_state.get('corpus_language', 'English')) if st.session_state.get('corpus_language', 'English') in ['English', 'Indonesian', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'] else 12,
                     key="mono_lang"
                 )
             else:
                 st.info("🔗 **Parallel Mode Active**")
                 colA, colB = st.columns(2)
                 with colA:
-                    st.session_state['corpus_language'] = st.selectbox("Source Language", ['English', 'Indonesian', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'], index=0, key="p_src_lang")
+                    st.session_state['corpus_language'] = st.selectbox("Source Language", ['English', 'Indonesian', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'], index=0, key="p_src_lang")
                 with colB:
-                    st.session_state['target_language'] = st.selectbox("Target Language", ['English', 'Indonesian', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'], index=1, key="p_tgt_lang")
+                    st.session_state['target_language'] = st.selectbox("Target Language", ['English', 'Indonesian', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'], index=1, key="p_tgt_lang")
 
             # Step 2: Show appropriate interface based on mode
             if st.session_state['corpus_selection_mode'] == "File Upload":
@@ -276,6 +286,7 @@ def render():
                 has_staged_content = st.session_state.get('staged_parallel') is not None
         
         if st.button("🚀 Load Corpus", type="primary", use_container_width=True, disabled=not has_staged_content):
+            start_time_total = time.time()
             loaded_names = []
             
             # 1. Process Monolingual Uploads
@@ -522,8 +533,11 @@ def render():
                 st.session_state['corpus_selection_mode'] = None
                 
                 st.cache_data.clear()
-                file_names = ", ".join(loaded_names + [f"{ext}" for ext in []])
-                st.session_state['corpus_loaded_success_msg'] = f"corpus loaded successfully: '{', '.join(loaded_names)}'"
+                total_time = time.time() - start_time_total
+                mins = int(total_time // 60)
+                secs = int(total_time % 60)
+                time_str = f"{mins} minutes and {secs} seconds" if mins > 0 else f"{secs} seconds"
+                st.session_state['corpus_loaded_success_msg'] = f"corpus loaded successfully: '{', '.join(loaded_names)}'. Load completed in {time_str}"
                 st.rerun()
         
         # Reset button

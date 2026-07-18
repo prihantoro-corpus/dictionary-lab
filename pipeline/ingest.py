@@ -181,8 +181,12 @@ class CorpusParser:
                 'English': 'en_core_web_sm', 
                 'Chinese': 'zh_core_web_sm', 
                 'Japanese': 'ja_core_news_sm', 
-                'Korean': 'ko_core_news_sm', 
-                # Spanish, French, German, etc. could be added. 
+                'Korean': 'ko_core_news_sm',
+                'Spanish': 'es_core_news_sm',
+                'French': 'fr_core_news_sm',
+                'German': 'de_core_news_sm',
+                'Italian': 'it_core_news_sm',
+                'Portuguese': 'pt_core_news_sm',
                 # Indonesian/Arabic/Javanese don't have official lightweight core models in Spacy out-of-the-box,
                 # so we will use the multi-language model (xx_ent_wiki_sm) as a fallback.
                 'Indonesian': 'xx_ent_wiki_sm',

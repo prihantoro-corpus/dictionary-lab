@@ -59,6 +59,11 @@ def attach_corpora(conn, corpora_names):
         # Clean up corpus name to be a valid identifier
         safe_alias = corpus.replace('-', '_').replace(' ', '_').replace('.', '_')
         db_file = os.path.join(CORPORA_DIR, f"{corpus}.duckdb")
+        if not os.path.exists(db_file):
+            db_file_root = os.path.join(os.getcwd(), f"{corpus}.duckdb")
+            if os.path.exists(db_file_root):
+                db_file = db_file_root
+                
         if os.path.exists(db_file):
             try:
                 # Attach the database in read-only mode for querying
