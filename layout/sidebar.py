@@ -536,8 +536,8 @@ def render():
                 total_time = time.time() - start_time_total
                 mins = int(total_time // 60)
                 secs = int(total_time % 60)
-                time_str = f"{mins} minutes and {secs} seconds" if mins > 0 else f"{secs} seconds"
-                st.session_state['corpus_loaded_success_msg'] = f"corpus loaded successfully: '{', '.join(loaded_names)}'. Load completed in {time_str}"
+                time_str = f" Load completed in {mins} minutes and {secs} seconds." if total_time >= 1 else ""
+                st.session_state['corpus_loaded_success_msg'] = f"Corpus loaded successfully: '{', '.join(loaded_names)}'.{time_str}"
                 st.rerun()
         
         # Reset button
