@@ -186,6 +186,11 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
         unsafe_allow_html=True
     )
     
+    # Persistent Corpus Notification
+    loaded_corpora = st.session_state.get('loaded_corpora', [])
+    if loaded_corpora:
+        st.info(f"📚 **Actively Analyzing Corpus:** {', '.join(loaded_corpora)}")
+    
     # Custom CSS for Professional Look
     st.markdown("""
     <style>
