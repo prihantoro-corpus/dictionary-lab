@@ -7,7 +7,8 @@ __pycache__/
 # *.wal
 *.log
 
-corpora/
+# Ignore large XML files that exceed GitHub's 100MB limit
+corpora/BAWE.XML
 personal_overrides.json
 venv/
 .venv/
@@ -20,5 +21,6 @@ test_raw_sentence.txt
 test_root_tag.txt
 
 *.duckdb
-!bawe.duckdb
+!BAWE.duckdb
+!corpora/*.duckdb
 *.duckdb.wal
