@@ -42,8 +42,8 @@ def main():
     end_render = time.time()
     duration = end_render - start_render
     
-    if duration > 1.0:
-        st.toast(f"Interface rendered in {duration:.2f} seconds", icon="⏱️")
+    if duration > 0.1:
+        st.caption(f"⏱️ **Performance:** Interface rendered in {duration:.2f} seconds")
 
 if __name__ == "__main__":
     main()
