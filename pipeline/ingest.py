@@ -86,8 +86,8 @@ class CorpusParser:
                             if lines_checked > 10: break
             
             if not is_vertical:
-                if progress_callback: progress_callback(0.01, f"Initializing SpaCy for {lang_code}...")
-                print(f"Detected RAW text for {filepath}. Processing with Stanza (Language: {lang_code})...")
+                if progress_callback: progress_callback(0.01, f"Initializing NLP for {lang_code}...")
+                print(f"Detected RAW text for {filepath}. Processing (Language: {lang_code})...")
                 self.process_raw_text(filepath, corpus_name, lang_code, conn, progress_callback=progress_callback)
                 return
 
@@ -289,12 +289,11 @@ class CorpusParser:
             if not text_segment: continue
             
             # SENTENCE SPLITTING FIRST (before tokenization)
-            # Use user's regex pattern: /.*?[\.\!\?](?=\s|\n|$)/s
-            # Python equivalent with DOTALL flag
-            sentence_pattern = r'.*?[\.\!\?](?=\s|\n|$)'
-            sentences = re.findall(sentence_pattern, text_segment, re.DOTALL)
+            # A more efficient approach using re.split, splitting on punctuation or newlines
+            sentences = re.split(r'(?<=[\.\!\?])\s+|\n+', text_segment)
+            sentences = [s for s in sentences if s.strip()]
             
-            # If no sentences found (no punctuation), treat whole segment as one sentence
+            # If no sentences found, treat whole segment as one sentence
             if not sentences:
                 sentences = [text_segment]
             
