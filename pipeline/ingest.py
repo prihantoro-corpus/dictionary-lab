@@ -192,9 +192,9 @@ class CorpusParser:
                 'Indonesian': 'xx_ent_wiki_sm',
                 'Arabic': 'xx_ent_wiki_sm',
                 'Javanese': 'xx_ent_wiki_sm',
-                'Other': 'xx_ent_wiki_sm'
+                'Other': None
             }
-            spacy_model = lang_map.get(lang_code, 'xx_ent_wiki_sm')
+            spacy_model = lang_map.get(lang_code, None)
         
         nlp = None
         if spacy_model:
@@ -207,9 +207,25 @@ class CorpusParser:
                 if spacy_model.startswith('xx_'):
                     nlp.add_pipe('sentencizer') # Multi-lang needs sentencizer
             except Exception as e:
-                print(f"Failed to load SpaCy model {spacy_model}: {e}. Falling back to whitespace.")
+                print(f"Failed to load SpaCy model {spacy_model}: {e}. Will attempt Stanza fallback.")
                 nlp = None
 
+        stanza_nlp = None
+        if not nlp and lang_code != 'Other':
+            try:
+                import stanza
+                stanza_map = {
+                    'English': 'en', 'Chinese': 'zh', 'Japanese': 'ja', 'Korean': 'ko',
+                    'Spanish': 'es', 'French': 'fr', 'German': 'de', 'Italian': 'it',
+                    'Portuguese': 'pt', 'Indonesian': 'id', 'Arabic': 'ar', 'Swahili': 'sw'
+                }
+                slang = stanza_map.get(lang_code, 'en') # default to en
+                print(f"Initializing Stanza model for {slang}...")
+                stanza.download(slang)
+                stanza_nlp = stanza.Pipeline(lang=slang, processors='tokenize,pos,lemma')
+            except Exception as e:
+                print(f"Failed to load Stanza model: {e}. Falling back to whitespace.")
+                stanza_nlp = None
         
         # Clear existing
         print(f"Clearing existing data for corpus '{corpus_name}'...")
@@ -312,15 +328,23 @@ class CorpusParser:
                             })
                     except Exception as e:
                         print(f"SpaCy processing failed: {e}. Using fallback.")
-                        # Fallback to whitespace
-                        words = sentence_text.split()
-                        for w in words:
-                            tokens_to_add.append({
-                                'token': w,
-                                'tag': 'NA',
-                                'lemma': w
-                            })
-                else:
+                        nlp = None # Force fallback for rest of loop if it's broken
+                
+                if not nlp and stanza_nlp:
+                    try:
+                        doc = stanza_nlp(sentence_text)
+                        for sent in doc.sentences:
+                            for word in sent.words:
+                                tokens_to_add.append({
+                                    'token': word.text,
+                                    'tag': word.upos if word.upos else 'NA',
+                                    'lemma': word.lemma if word.lemma else word.text
+                                })
+                    except Exception as e:
+                        print(f"Stanza processing failed: {e}. Using whitespace fallback.")
+                        stanza_nlp = None
+                
+                if not nlp and not stanza_nlp:
                     # Whitespace Fallback
                     words = sentence_text.split()
                     for w in words:
