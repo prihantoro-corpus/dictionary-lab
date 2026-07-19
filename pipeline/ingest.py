@@ -289,11 +289,17 @@ class CorpusParser:
             if not text_segment: continue
             
             # SENTENCE SPLITTING FIRST (before tokenization)
-            # A more efficient approach using re.split, splitting on punctuation or newlines
-            sentences = re.split(r'(?<=[\.\!\?])\s+|\n+', text_segment)
+            # Try splitting by standard punctuation first
+            sentences = re.split(r'(?<=[\.\!\?])\s+', text_segment)
             sentences = [s for s in sentences if s.strip()]
             
-            # If no sentences found, treat whole segment as one sentence
+            # Failsafe: if there were no punctuation marks (only 1 or 0 sentences found), 
+            # fall back to splitting by newlines.
+            if len(sentences) <= 1:
+                sentences = re.split(r'\n+', text_segment)
+                sentences = [s for s in sentences if s.strip()]
+                
+            # If still no sentences found, treat whole segment as one sentence
             if not sentences:
                 sentences = [text_segment]
             
