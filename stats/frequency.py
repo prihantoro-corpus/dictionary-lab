@@ -207,17 +207,8 @@ def get_pmw_range(where_clause="1=1", params=()):
     res_max = safe_execute(conn, query_max, params).fetchone()
     max_freq = res_max[0] if res_max else 0
     
-    # Get min frequency token (minimum should be 1 if token exists)
-    query_min = f"""
-        SELECT COUNT(*) as cnt 
-        FROM tokens 
-        WHERE {where_clause} 
-        GROUP BY token 
-        ORDER BY cnt ASC 
-        LIMIT 1
-    """
-    res_min = safe_execute(conn, query_min, params).fetchone()
-    min_freq = res_min[0] if res_min else 1
+    # Get min frequency token (minimum count is always 1)
+    min_freq = 1
     
     if not is_shared:
         conn.close()
