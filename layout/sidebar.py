@@ -752,6 +752,39 @@ def render():
         }
 
     
+    # --- Wordlists Section ---
+    from wordlist import manager as wl_manager
+    loaded_wlists = wl_manager.load_wordlists()
+    
+    with st.sidebar.expander("📚 Wordlists", expanded=False):
+        st.caption("Active Wordlists for profiling & entry badges:")
+        
+        if 'active_wordlists' not in st.session_state:
+            st.session_state['active_wordlists'] = {}
+            
+        all_wl_names = list(loaded_wlists.keys())
+        if wl_manager.HAS_CEFR and "CEFR" not in all_wl_names:
+            all_wl_names.insert(0, "CEFR")
+            
+        if not all_wl_names:
+            st.caption("No wordlists found in `wordlist/` folder.")
+        else:
+            for wl_name in sorted(all_wl_names):
+                if wl_name not in st.session_state['active_wordlists']:
+                    st.session_state['active_wordlists'][wl_name] = True
+                    
+                cb_val = st.checkbox(
+                    f"🏷️ {wl_name}",
+                    value=st.session_state['active_wordlists'][wl_name],
+                    key=f"wl_cb_{wl_name}"
+                )
+                st.session_state['active_wordlists'][wl_name] = cb_val
+                
+        st.write("---")
+        if st.button("📊 Open Vocabulary Profiler", key="btn_open_profiler", use_container_width=True):
+            st.session_state['main_nav'] = "Vocabulary Profiler"
+            st.rerun()
+
     st.sidebar.title("METADATA")
     meta_keys = get_metadata_keys(active_corpora)
     selected_metadata = {}
