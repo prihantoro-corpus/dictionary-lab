@@ -6,55 +6,50 @@ def get_kwic_lines(token, window=7, limit=50, where_clause="1=1", params=(), pos
     """
     conn, is_shared = get_connection()
     
-    # 1. Find IDs of the token matching filters
     if pos_tag:
-        matches = safe_execute(conn, f"""
-            SELECT id, file_id, sentence_id, doc_id, sentence_num
-            FROM tokens 
-            WHERE token ILIKE ? AND tag = ? AND {where_clause} 
-            ORDER BY id
-            LIMIT ?
-        """, (token, pos_tag, *params, limit)).fetchall()
+        match_cte = f"SELECT id, file_id, sentence_id, doc_id, sentence_num FROM tokens WHERE token ILIKE ? AND tag = ? AND {where_clause} ORDER BY id LIMIT ?"
+        match_params = (token, pos_tag, *params, limit)
     else:
-        matches = safe_execute(conn, f"""
-            SELECT id, file_id, sentence_id, doc_id, sentence_num
-            FROM tokens 
-            WHERE token ILIKE ? AND {where_clause} 
-            ORDER BY id
-            LIMIT ?
-        """, (token, *params, limit)).fetchall()
+        match_cte = f"SELECT id, file_id, sentence_id, doc_id, sentence_num FROM tokens WHERE token ILIKE ? AND {where_clause} ORDER BY id LIMIT ?"
+        match_params = (token, *params, limit)
+
+    query = f"""
+        WITH matches AS ({match_cte})
+        SELECT 
+            m.id as match_id, m.file_id, m.sentence_id, m.doc_id, m.sentence_num,
+            t.token, t.id as token_id
+        FROM matches m
+        JOIN tokens t ON t.file_id = m.file_id AND (
+            (m.sentence_id IS NOT NULL AND m.sentence_id > 0 AND t.sentence_id = m.sentence_id)
+            OR ((m.sentence_id IS NULL OR m.sentence_id <= 0) AND t.id BETWEEN m.id - ? AND m.id + ?)
+        )
+        ORDER BY m.id, t.id
+    """
+    full_params = (*match_params, window, window)
+    rows = safe_execute(conn, query, full_params).fetchall()
     
+    if not rows:
+        if not is_shared: conn.close()
+        return []
+
+    from collections import defaultdict
+    grouped = defaultdict(list)
+    match_info = {}
+
+    for match_id, file_id, sent_id, doc_id, sent_num, tok, tok_id in rows:
+        grouped[match_id].append((tok, tok_id))
+        if match_id not in match_info:
+            match_info[match_id] = (sent_id, doc_id, sent_num)
+
     results = []
-    
-    for match_id, file_id, sent_id, doc_id, sent_num in matches:
-        # 2. For each match, get window OR full sentence
-        if sent_id and sent_id > 0:
-             # Full Sentence
-             window_tokens = safe_execute(conn, """
-                SELECT token, id
-                FROM tokens 
-                WHERE sentence_id = ? AND file_id = ?
-                ORDER BY id
-            """, (sent_id, file_id)).fetchall()
-        else:
-            # Fixed Window Fallback
-            start_id = match_id - window
-            end_id = match_id + window
-            window_tokens = safe_execute(conn, """
-                SELECT token, id
-                FROM tokens 
-                WHERE id BETWEEN ? AND ? AND file_id = ?
-                ORDER BY id
-            """, (start_id, end_id, file_id)).fetchall()
-        
-        # Assemble
+    for match_id, window_tokens in grouped.items():
+        sent_id, doc_id, sent_num = match_info[match_id]
         left = []
         node = ""
         right = []
         
-        # Add start tag if full sentence
         if sent_id and sent_id > 0:
-            left.insert(0, "&lt;s&gt;")
+            left.append("&lt;s&gt;")
 
         for t, tid in window_tokens:
             if tid == match_id:
@@ -64,10 +59,9 @@ def get_kwic_lines(token, window=7, limit=50, where_clause="1=1", params=(), pos
             elif tid > match_id:
                 right.append(t)
         
-        # Add end tag if full sentence
         if sent_id and sent_id > 0:
             right.append("&lt;/s&gt;")
-                
+
         results.append({
             'left': " ".join(left),
             'node': node,
@@ -76,9 +70,8 @@ def get_kwic_lines(token, window=7, limit=50, where_clause="1=1", params=(), pos
             'doc_id': doc_id,
             'sentence_num': sent_num
         })
-        
-    if not is_shared:
-        conn.close()
+
+    if not is_shared: conn.close()
     return results
 
 def get_phrase_kwic_lines(phrase, window=7, limit=50, where_clause="1=1", params=(), skip_punct=True):
@@ -128,6 +121,7 @@ def get_phrase_kwic_lines(phrase, window=7, limit=50, where_clause="1=1", params
             SELECT id, file_id, sentence_id, doc_id, sentence_num
             FROM tokens 
             WHERE token ILIKE ? AND {where_clause}
+            LIMIT 2000
         )
         SELECT t0.id, t0.file_id, t{length-1}.id as final_id, t0.sentence_id, t0.doc_id, t0.sentence_num
         FROM start_tokens t0

@@ -19,13 +19,16 @@ def search_exact(token, where_clause="1=1", params=()):
 
 def search_fuzzy(token, limit=5):
     conn, is_shared = get_connection()
-    all_tokens_res = safe_execute(conn, "SELECT DISTINCT token FROM tokens").fetchall()
+    if not token:
+        if not is_shared: conn.close()
+        return []
+    
+    first_char = token[0]
+    all_tokens_res = safe_execute(conn, "SELECT DISTINCT token FROM tokens WHERE token ILIKE ? LIMIT 2000", (f"{first_char}%",)).fetchall()
     all_tokens = [str(r[0]) for r in all_tokens_res if r[0] is not None]
     if not is_shared:
         conn.close()
     
-    # Calculate distance
-    # Filter close matches
     matches = []
     for t in all_tokens:
         dist = Levenshtein.distance(token.lower(), t.lower())
