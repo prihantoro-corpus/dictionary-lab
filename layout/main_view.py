@@ -718,7 +718,34 @@ def render_multiword_view(query, where_clause, params, stop_words, collocate_fil
         f'</div>',
         f'</div>'
     ]
-    zipf_band_html = "".join(zipf_band_parts)
+    # Volatility Band next to ZIPF
+    selected_time_attr = st.session_state.get('selected_time_attribute')
+    if not selected_time_attr:
+        avail_attrs = word_tracker.get_available_time_attributes(where_clause, params)
+        selected_time_attr = avail_attrs[0] if avail_attrs else 'corpus'
+        
+    vol_res = word_tracker.calculate_word_volatility(query, selected_time_attr, where_clause, params)
+    vol_band_html = ""
+    if vol_res.get('success'):
+        v_label = vol_res['volatility_label']
+        v_score = vol_res['volatility_score']
+        v_desc = vol_res['description']
+        
+        label_styles = {
+            "🔴 Highly Volatile": ("#ffebee", "#c62828", "#b71c1c"),
+            "🟡 Moderately Volatile": ("#fff8e1", "#f57f17", "#e65100"),
+            "🟢 Stable / Low Volatility": ("#e8f5e9", "#2e7d32", "#1b5e20"),
+            "⚪ Insufficient Time Bins": ("#f5f5f5", "#616161", "#424242")
+        }
+        bg, fg, border = label_styles.get(v_label, ("#f5f5f5", "#333333", "#cccccc"))
+        
+        vol_band_parts = [
+            f'<div title="Volatility across {selected_time_attr}: {v_desc}" style="display:inline-flex; flex-direction:column; align-items:center; background:{bg}; border:1px solid {border}; padding:6px 10px; border-radius:4px; cursor:help;">',
+            f'<span style="font-size:12px; color:#666; margin-bottom:4px;">Volatility</span>',
+            f'<span style="font-weight:bold; font-size:13px; color:{fg};">{v_label}</span>',
+            f'</div>'
+        ]
+        vol_band_html = "".join(vol_band_parts)
 
     # Rank Boxes
     parts = query.split()
@@ -741,7 +768,37 @@ def render_multiword_view(query, where_clause, params, stop_words, collocate_fil
         rank_htmls.append(get_rank_html(f"Rank of '{c2}' for '{n2}'", r2))
 
     rank_container = " ".join(rank_htmls)
-    st.markdown(f'<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;"><span style="font-size: 24px;">Freq: <strong>{freq}</strong></span>{pmw_band_html}{zipf_band_html}{rank_container}</div>', unsafe_allow_html=True)
+    
+    col_m1, col_m2 = st.columns([8.5, 1.5], vertical_alignment="center")
+    with col_m1:
+        st.markdown(f'<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;"><span style="font-size: 24px;">Freq: <strong>{freq}</strong></span>{pmw_band_html}{zipf_band_html}{vol_band_html}{rank_container}</div>', unsafe_allow_html=True)
+    with col_m2:
+        if vol_res.get('success'):
+            with st.popover("📈 See Chart", use_container_width=True):
+                st.write(f"**Usage Volatility across '{selected_time_attr}':**")
+                st.markdown(f"### {v_label}")
+                st.caption(f"{v_desc} (CV = **{v_score:.3f}**, Mean PMW = **{vol_res.get('mean_pmw', 0):.2f}**)")
+                
+                df_chart = vol_res.get('time_series_df')
+                if df_chart is not None and not df_chart.empty:
+                    fig_p, ax_p = plt.subplots(figsize=(5, 2.5))
+                    ax_p.plot(df_chart['time_period'].astype(str), df_chart['pmw'], marker='o', color='#2196F3', linewidth=2)
+                    ax_p.set_xlabel(selected_time_attr, fontsize=8)
+                    ax_p.set_ylabel("PMW", fontsize=8)
+                    ax_p.grid(True, linestyle='--', alpha=0.5)
+                    plt.xticks(rotation=45, ha='right', fontsize=7)
+                    plt.tight_layout()
+                    st.pyplot(fig_p)
+                    st.dataframe(
+                        df_chart.rename(columns={
+                            'time_period': selected_time_attr,
+                            'frequency': 'Freq',
+                            'total_tokens': 'Total Tokens',
+                            'pmw': 'PMW'
+                        }),
+                        use_container_width=True,
+                        hide_index=True
+                    )
     
     # 5. External Links
     def_url, img_url = components.get_google_links(query, language)
@@ -1094,6 +1151,35 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                 ]
                 zipf_band_html = "".join(zipf_band_parts)
                 
+                # Volatility Band next to ZIPF
+                selected_time_attr = st.session_state.get('selected_time_attribute')
+                if not selected_time_attr:
+                    avail_attrs = word_tracker.get_available_time_attributes(where_clause, params)
+                    selected_time_attr = avail_attrs[0] if avail_attrs else 'corpus'
+                    
+                vol_res = word_tracker.calculate_word_volatility(query, selected_time_attr, where_clause, params, pos_tag=tag)
+                vol_band_html = ""
+                if vol_res.get('success'):
+                    v_label = vol_res['volatility_label']
+                    v_score = vol_res['volatility_score']
+                    v_desc = vol_res['description']
+                    
+                    label_styles = {
+                        "🔴 Highly Volatile": ("#ffebee", "#c62828", "#b71c1c"),
+                        "🟡 Moderately Volatile": ("#fff8e1", "#f57f17", "#e65100"),
+                        "🟢 Stable / Low Volatility": ("#e8f5e9", "#2e7d32", "#1b5e20"),
+                        "⚪ Insufficient Time Bins": ("#f5f5f5", "#616161", "#424242")
+                    }
+                    bg, fg, border = label_styles.get(v_label, ("#f5f5f5", "#333333", "#cccccc"))
+                    
+                    vol_band_parts = [
+                        f"<div title=\"Volatility across {selected_time_attr}: {v_desc}\" style=\"display:inline-flex; flex-direction:column; align-items:center; background:{bg}; border:1px solid {border}; padding:6px 10px; border-radius:4px; cursor:help;\">",
+                        f"<span style=\"font-size:12px; color:#666; margin-bottom:4px;\">Volatility</span>",
+                        f"<span style=\"font-weight:bold; font-size:13px; color:{fg};\">{v_label}</span>",
+                        f"</div>"
+                    ]
+                    vol_band_html = "".join(vol_band_parts)
+                
                 # Pronunciation display (conditional)
                 pron_display = ""
                 if pron:
@@ -1117,6 +1203,8 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                 html_parts.append(badges_html)
                 html_parts.append(pmw_band_html)
                 html_parts.append(zipf_band_html)
+                if vol_band_html:
+                    html_parts.append(vol_band_html)
                 
                 # Filter out empty strings
                 html_parts = [p for p in html_parts if p]
@@ -1124,8 +1212,37 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                 # Combine all parts
                 combined_html = " ".join(html_parts)
                 
-                # Render all metadata
-                st.markdown(f'<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">{combined_html}</div>', unsafe_allow_html=True)
+                # Render metadata row + See Chart popover
+                c_meta1, c_meta2 = st.columns([8.5, 1.5], vertical_alignment="center")
+                with c_meta1:
+                    st.markdown(f'<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">{combined_html}</div>', unsafe_allow_html=True)
+                with c_meta2:
+                    if vol_res.get('success'):
+                        with st.popover("📈 See Chart", use_container_width=True):
+                            st.write(f"**Usage Volatility across '{selected_time_attr}':**")
+                            st.markdown(f"### {v_label}")
+                            st.caption(f"{v_desc} (CV = **{v_score:.3f}**, Mean PMW = **{vol_res.get('mean_pmw', 0):.2f}**)")
+                            
+                            df_chart = vol_res.get('time_series_df')
+                            if df_chart is not None and not df_chart.empty:
+                                fig_p, ax_p = plt.subplots(figsize=(5, 2.5))
+                                ax_p.plot(df_chart['time_period'].astype(str), df_chart['pmw'], marker='o', color='#2196F3', linewidth=2)
+                                ax_p.set_xlabel(selected_time_attr, fontsize=8)
+                                ax_p.set_ylabel("PMW", fontsize=8)
+                                ax_p.grid(True, linestyle='--', alpha=0.5)
+                                plt.xticks(rotation=45, ha='right', fontsize=7)
+                                plt.tight_layout()
+                                st.pyplot(fig_p)
+                                st.dataframe(
+                                    df_chart.rename(columns={
+                                        'time_period': selected_time_attr,
+                                        'frequency': 'Freq',
+                                        'total_tokens': 'Total Tokens',
+                                        'pmw': 'PMW'
+                                    }),
+                                    use_container_width=True,
+                                    hide_index=True
+                                )
                 # Definition Block
                 st.markdown(f"""
                 <div class="sense-block">
