@@ -5,7 +5,7 @@ import eng_to_ipa as ipa
 from utils import indo_g2p
 import json
 from pipeline import search, cache_manager as cache, profiler
-from stats import frequency, collocation, kwic
+from stats import frequency, collocation, kwic, word_tracker
 from wordlist import manager
 from layout import components
 from pipeline.overrides_io import save_overrides
@@ -200,12 +200,14 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
 
     # Navigation Tabs
     # We use a radio button styled as tabs or just simple toggle
-    nav = st.radio("Navigation", ["Search", "Corpus Statistic", "Vocabulary Profiler"], horizontal=True, label_visibility="collapsed", key="main_nav")
+    nav = st.radio("Navigation", ["Search", "Word Tracker", "Corpus Statistic", "Vocabulary Profiler"], horizontal=True, label_visibility="collapsed", key="main_nav")
     
     if nav == "Corpus Statistic":
         render_entry_tab(where_clause, params)
     elif nav == "Vocabulary Profiler":
         render_profiler_tab(where_clause, params)
+    elif nav == "Word Tracker":
+        render_word_tracker_tab(where_clause, params)
     else:
         render_search_tab(where_clause, params, stop_words, collocate_filter, skip_punct)
 
@@ -375,7 +377,125 @@ def render_profiler_tab(where_clause, params):
                 ax1.pie([data['covered_count'], data['not_covered_count']], labels=['Covered', 'Not Covered'], 
                        autopct='%1.1f%%', startangle=90, colors=['#4CAF50', '#FF5252'], shadow=True, explode=(0.05, 0))
                 ax1.axis('equal')
-                st.pyplot(fig1, use_container_width=False)
+    
+
+def render_word_tracker_tab(where_clause="1=1", params=()):
+    st.title("⏱️ CORTEX Word Tracker")
+    st.info("Tracks word usage volatility across time using corpus metadata and document attributes.")
+    
+    # 1. Feature of Time Selection via Radio Button
+    available_attrs = word_tracker.get_available_time_attributes(where_clause, params)
+    if not available_attrs:
+        available_attrs = ['corpus', 'doc_id', 'file_id']
+        
+    st.subheader("1. Select Feature of Time")
+    st.caption("Choose metadata key or structural attribute to group time periods:")
+    
+    selected_time_attr = st.radio(
+        "Feature of Time (Attribute)",
+        options=available_attrs,
+        horizontal=True,
+        key="word_tracker_time_radio"
+    )
+    
+    st.divider()
+    
+    # 2. Target Word Search Input
+    st.subheader("2. Target Word Search")
+    
+    default_word = st.session_state.get('search_box', '').strip()
+    if not default_word:
+        default_word = "the"
+        
+    col_input, _ = st.columns([3, 1])
+    with col_input:
+        token_input = st.text_input("Enter Word / Token:", value=default_word, key="word_tracker_target_word")
+        
+    token = token_input.strip()
+    
+    if not token:
+        st.warning("Please enter a word to track volatility.")
+        return
+        
+    # 3. Calculate Volatility
+    with st.spinner(f"Calculating volatility for '{token}' across '{selected_time_attr}'..."):
+        vol_result = word_tracker.calculate_word_volatility(token, selected_time_attr, where_clause, params)
+        
+    if not vol_result.get('success'):
+        st.error(vol_result.get('message', 'No volatility data available.'))
+        return
+        
+    # 4. Volatility Status Banner & Label
+    label = vol_result['volatility_label']
+    score = vol_result['volatility_score']
+    desc = vol_result['description']
+    
+    st.markdown("### Volatility Status")
+    
+    label_colors = {
+        "🔴 Highly Volatile": ("#ffebee", "#c62828", "#b71c1c"),
+        "🟡 Moderately Volatile": ("#fff8e1", "#f57f17", "#e65100"),
+        "🟢 Stable / Low Volatility": ("#e8f5e9", "#2e7d32", "#1b5e20"),
+        "⚪ Insufficient Time Bins": ("#f5f5f5", "#616161", "#424242")
+    }
+    bg, fg, border = label_colors.get(label, ("#f5f5f5", "#333333", "#cccccc"))
+    
+    st.markdown(f"""
+    <div style="background-color: {bg}; border-left: 6px solid {border}; padding: 16px 20px; border-radius: 6px; margin-bottom: 20px;">
+        <span style="font-size: 26px; font-weight: bold; color: {fg};">{label}</span>
+        <div style="font-size: 15px; color: #444; margin-top: 6px;">{desc}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 5. Volatility Metrics Cards
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Coefficient of Var (CV)", f"{score:.3f}")
+    m2.metric("Time Periods", vol_result['num_periods'])
+    m3.metric("Mean PMW", f"{vol_result['mean_pmw']:.2f}")
+    m4.metric("Max PMW", f"{vol_result['max_pmw']:.2f}")
+    m5.metric("Min PMW", f"{vol_result['min_pmw']:.2f}")
+    
+    st.divider()
+    
+    # 6. Time Series Visualization & Breakdown Data Table
+    st.subheader(f"📈 Usage Frequency Across Time ({selected_time_attr})")
+    
+    df_ts = vol_result['time_series_df']
+    if not df_ts.empty:
+        col_chart, col_data = st.columns([6, 4])
+        
+        with col_chart:
+            st.caption("PMW (Per Million Words) per Time Period")
+            fig, ax = plt.subplots(figsize=(6, 3.5))
+            ax.plot(df_ts['time_period'].astype(str), df_ts['pmw'], marker='o', color='#2196F3', linewidth=2, markersize=6)
+            ax.set_xlabel(selected_time_attr.capitalize(), fontsize=10)
+            ax.set_ylabel("PMW", fontsize=10)
+            ax.grid(True, linestyle='--', alpha=0.5)
+            plt.xticks(rotation=45, ha='right', fontsize=8)
+            plt.tight_layout()
+            st.pyplot(fig)
+            
+        with col_data:
+            st.caption("Detailed Breakdown Table")
+            st.dataframe(
+                df_ts.rename(columns={
+                    'time_period': selected_time_attr,
+                    'frequency': 'Freq',
+                    'total_tokens': 'Total Tokens',
+                    'pmw': 'PMW'
+                }),
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            csv_data = df_ts.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                "📥 Download Time Series CSV",
+                csv_data,
+                file_name=f"word_volatility_{token}_{selected_time_attr}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
 
 
 def render_entry_tab(where_clause, params):
@@ -1031,6 +1151,37 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                 render_clickable_word_row("Words from same Lemma", same_lemma_words, key_prefix="lemma", context=tag)
                 related = search.get_related_words(query, limit=10)
                 render_clickable_word_row("Related Words", related, key_prefix="related", context=tag)
+                # Volatility Expander
+                with st.expander("⏱️ CORTEX Word Volatility Tracker", expanded=False):
+                    avail_time_attrs = word_tracker.get_available_time_attributes(where_clause, params)
+                    if not avail_time_attrs:
+                        avail_time_attrs = ['corpus', 'doc_id', 'file_id']
+                    
+                    st.write("**Feature of Time (Select Attribute):**")
+                    sel_time_attr = st.radio(
+                        "Time Feature Attribute",
+                        options=avail_time_attrs,
+                        horizontal=True,
+                        key=f"vol_attr_radio_{query}_{tag}"
+                    )
+                    vol_res = word_tracker.calculate_word_volatility(query, sel_time_attr, where_clause, params, pos_tag=tag)
+                    if vol_res.get('success'):
+                        v_label = vol_res['volatility_label']
+                        v_score = vol_res['volatility_score']
+                        v_desc = vol_res['description']
+                        st.markdown(f"### {v_label}")
+                        st.caption(f"{v_desc} (CV = **{v_score:.3f}**, Mean PMW = **{vol_res['mean_pmw']:.2f}**)")
+                        
+                        df_ts_s = vol_res['time_series_df']
+                        if not df_ts_s.empty:
+                            fig_v, ax_v = plt.subplots(figsize=(5, 2))
+                            ax_v.plot(df_ts_s['time_period'].astype(str), df_ts_s['pmw'], marker='o', color='#2196F3', linewidth=2)
+                            ax_v.set_xlabel(sel_time_attr, fontsize=8)
+                            ax_v.set_ylabel("PMW", fontsize=8)
+                            ax_v.grid(True, linestyle='--', alpha=0.5)
+                            plt.xticks(rotation=45, ha='right', fontsize=7)
+                            plt.tight_layout()
+                            st.pyplot(fig_v)
 
                 st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
                 
