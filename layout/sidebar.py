@@ -262,19 +262,79 @@ def render():
 
             elif st.session_state['corpus_selection_mode'] == "Online Corpus":
                 st.caption("🌐 Build Corpus from Online Sources:")
-                online_mode = st.radio("Source Mode", ["YouTube", "Mastodon", "BlueSky", "Link Collection", "Keyword Search"], horizontal=True, key="online_mode_radio")
+                online_mode = st.radio("Source Mode", ["YouTube", "Mastodon", "BlueSky", "Link Collection", "Keyword Search", "Detik.com"], horizontal=True, key="online_mode_radio")
                 st.session_state['online_builder_mode'] = online_mode
                 
                 if online_mode == "YouTube":
                     st.session_state['online_url'] = st.text_input("YouTube Video URL", placeholder="https://www.youtube.com/watch?v=...", key="online_yt_url")
                     st.session_state['online_yt_mode'] = st.radio("What to extract?", ["both", "transcript", "comments"], horizontal=True, key="online_yt_mode_sb")
+                    if st.session_state['online_yt_mode'] in ["comments", "both"]:
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.session_state['online_yt_max_comments'] = st.selectbox("Max Comments", [10, 50, 100, 250, 500], index=2, key="online_yt_max_comments_sb")
+                        with col2:
+                            st.session_state['online_yt_strategy'] = st.selectbox("Comment Selection", ["From top (Fastest)", "From bottom", "Random", "By likes", "By keyword"], key="online_yt_strategy_sb")
+                        if st.session_state.get('online_yt_strategy') == "By keyword":
+                            kw_input = st.text_input("Comment Keywords (comma separated)", key="online_yt_kw_input")
+                            st.session_state['online_yt_keywords'] = [k.strip() for k in kw_input.split(',') if k.strip()] if kw_input else []
                 elif online_mode == "Mastodon" or online_mode == "BlueSky":
                     urls = st.text_area(f"{online_mode} URLs (one per line)", placeholder="https://...", key="online_social_urls")
                     st.session_state['online_urls'] = [u.strip() for u in urls.split('\n') if u.strip()]
                     st.session_state['online_social_mode'] = st.radio("Extract:", ["both", "post", "replies"], horizontal=True, key="online_social_mode_sb")
+                    if st.session_state['online_social_mode'] in ["replies", "both"]:
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.session_state['online_social_max'] = st.selectbox("Max Replies", [10, 50, 100, 250], index=2, key="online_social_max_sb")
+                        with col2:
+                            st.session_state['online_social_strategy'] = st.selectbox("Reply Selection", ["From top (Fastest)", "From bottom", "Random", "By likes", "By keyword"], key="online_social_strategy_sb")
+                        if st.session_state.get('online_social_strategy') == "By keyword":
+                            kw_input = st.text_input("Reply Keywords (comma separated)", key="online_social_kw_input")
+                            st.session_state['online_social_keywords'] = [k.strip() for k in kw_input.split(',') if k.strip()] if kw_input else []
                 elif online_mode == "Link Collection":
                     urls = st.text_area("URLs to scrape (one per line)", placeholder="https://...", key="online_link_coll_urls")
                     st.session_state['online_urls'] = [u.strip() for u in urls.split('\n') if u.strip()]
+                elif online_mode == "Detik.com":
+                    detik_mode = st.radio("Scrape Mode", ["By Tag", "By Section"], horizontal=True, key="online_detik_mode_sb")
+                    st.session_state['online_detik_mode'] = detik_mode
+                    if detik_mode == "By Tag":
+                        st.session_state['online_detik_tag'] = st.text_input("Tag Keyword", value="ppds", placeholder="ppds, stunting, pemilu, ai", key="online_detik_tag_input")
+                    else:
+                        section_options = [
+                            "News (https://news.detik.com/indeks)",
+                            "Food (https://food.detik.com/indeks)",
+                            "Hikmah (https://www.detik.com/hikmah/indeks)",
+                            "Finance (https://finance.detik.com/indeks)",
+                            "Health (https://health.detik.com/indeks)",
+                            "Inet (https://inet.detik.com/indeks)",
+                            "Hot (https://hot.detik.com/indeks)",
+                            "Sport (https://sport.detik.com/indeks)",
+                            "Travel (https://travel.detik.com/indeks)",
+                            "Oto (https://oto.detik.com/indeks)",
+                            "Wolipop (https://wolipop.detik.com/indeks)",
+                            "Edu (https://edu.detik.com/indeks)",
+                            "Properti (https://properti.detik.com/indeks)",
+                            "Custom Section URL..."
+                        ]
+                        sec_choice = st.selectbox("Select Detik Section", section_options, index=0, key="online_detik_sec_sb")
+                        if sec_choice == "Custom Section URL...":
+                            st.session_state['online_detik_section'] = st.text_input("Enter Custom Section Index URL", value="https://food.detik.com/indeks", key="online_detik_custom_sec_input")
+                        else:
+                            m = re.search(r'\((https?://[^\)]+)\)', sec_choice)
+                            st.session_state['online_detik_section'] = m.group(1) if m else sec_choice.split()[0].lower()
+                    
+                    st.session_state['online_detik_count'] = st.radio("Target Article Count", [10, 50, 100, 150, 200, 300, "All (Max 500)"], index=2, horizontal=True, key="online_detik_count_radio")
+                    
+                    enable_date_filter = st.checkbox("📅 Filter by Date Range", value=False, key="online_detik_date_filter_cb")
+                    if enable_date_filter:
+                        import datetime
+                        d_col1, d_col2 = st.columns(2)
+                        with d_col1:
+                            st.session_state['online_detik_start_date'] = st.date_input("Start Date", value=datetime.date.today() - datetime.timedelta(days=30), key="online_detik_start_date_input")
+                        with d_col2:
+                            st.session_state['online_detik_end_date'] = st.date_input("End Date", value=datetime.date.today(), key="online_detik_end_date_input")
+                    else:
+                        st.session_state['online_detik_start_date'] = None
+                        st.session_state['online_detik_end_date'] = None
                 elif online_mode == "Keyword Search":
                     kw = st.text_input("Keywords (comma separated)", placeholder="corpus linguistics, parsing", key="online_kw_input")
                     st.session_state['online_keywords'] = [k.strip() for k in kw.split(',') if k.strip()]
@@ -418,18 +478,25 @@ def render():
                 from pipeline.online_corpus import build_online_corpus
                 parser = ingest.CorpusParser()
                 
-                mode = st.session_state.get('online_builder_mode', '').lower().replace(' ', '_')
+                mode = st.session_state.get('online_builder_mode', '').lower().replace(' ', '_').replace('.', '')
                 if mode == "link_collection": mode = "links"
                 if mode == "keyword_search": mode = "keyword"
+                if mode == "detikcom": mode = "detik"
                 
                 params = {}
                 if mode == "youtube":
                     params['url'] = st.session_state.get('online_url', '')
                     params['mode'] = st.session_state.get('online_yt_mode', 'both')
+                    params['max_comments'] = st.session_state.get('online_yt_max_comments', 100)
+                    params['selection_strategy'] = st.session_state.get('online_yt_strategy', 'From top (Fastest)')
+                    params['keywords'] = st.session_state.get('online_yt_keywords', [])
                 elif mode in ("mastodon", "bluesky", "links"):
                     params['urls'] = st.session_state.get('online_urls', [])
                     params['links'] = st.session_state.get('online_urls', [])
                     params['mode'] = st.session_state.get('online_social_mode', 'both')
+                    params['max_comments'] = st.session_state.get('online_social_max', 100)
+                    params['selection_strategy'] = st.session_state.get('online_social_strategy', 'From top (Fastest)')
+                    params['keywords'] = st.session_state.get('online_social_keywords', [])
                 elif mode == "keyword":
                     params['keywords'] = st.session_state.get('online_keywords', [])
                     if 'online_links_to_scrape' in st.session_state:
@@ -438,6 +505,14 @@ def render():
                     else:
                         st.error("Please click 'Find Links' and select links first.")
                         st.stop()
+                elif mode == "detik":
+                    det_mode = st.session_state.get('online_detik_mode', 'By Tag')
+                    params['scrape_mode'] = "tag" if det_mode == "By Tag" else "section"
+                    params['tag'] = st.session_state.get('online_detik_tag', 'ppds')
+                    params['section_target'] = st.session_state.get('online_detik_section', 'news')
+                    params['target_count'] = st.session_state.get('online_detik_count', 100)
+                    params['start_date'] = st.session_state.get('online_detik_start_date')
+                    params['end_date'] = st.session_state.get('online_detik_end_date')
                 
                 progress_bar = st.progress(0)
                 status_text = st.empty()
@@ -455,6 +530,10 @@ def render():
                     corpus_clean_name = f"Online_{mode.capitalize()}"
                     if mode == "keyword_scrape":
                         corpus_clean_name = "Online_Keyword"
+                    elif mode == "detik":
+                        target_lbl = params['section_target'] if params['scrape_mode'] == 'section' else params['tag']
+                        clean_lbl = target_lbl.replace('https://', '').replace('/', '_').replace('.', '_')
+                        corpus_clean_name = f"Detik_{clean_lbl}"
                     
                     # Show which URLs were scraped
                     scraped_urls = [f.get('url') for f in files if f.get('url')]
@@ -464,7 +543,8 @@ def render():
                                 st.markdown(f"- [{u}]({u})")
                     
                     # Combine all files into one big file and ingest it
-                    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".txt")
+                    suffix = ".xml" if mode == "detik" or any(isinstance(f, dict) and f.get('filename', '').endswith('.xml') for f in files) else ".txt"
+                    tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix)
                     try:
                         with os.fdopen(tmp_fd, 'w', encoding='utf-8') as tmp:
                             for file_data in files:

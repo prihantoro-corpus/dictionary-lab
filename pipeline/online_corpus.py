@@ -24,7 +24,6 @@ class OnlineCorpusBuilder:
         
         words = count_words(content)
         if self.current_words + words > self.limit_words:
-            # Add what we can or just add and stop
             self.downloaded_files.append({"filename": filename, "content": content})
             self.current_words += words
             self.is_limit_reached = True
@@ -38,107 +37,242 @@ class OnlineCorpusBuilder:
         try:
             api = YouTubeTranscriptApi()
             transcript_list = api.list(video_id)
-            # Try to get English or Indonesian manually, or just use first available
-            transcript = transcript_list.find_transcript(['en', 'id', 'ms'])
+            
+            transcript = None
+            
+            # 1. Try to get preferred manually created languages
+            try:
+                transcript = transcript_list.find_transcript(['en', 'id', 'ms', 'en-US', 'en-GB'])
+            except:
+                pass
+                
+            # 2. Try to get preferred generated languages
+            if not transcript:
+                try:
+                    transcript = transcript_list.find_generated_transcript(['en', 'id', 'ms', 'en-US', 'en-GB'])
+                except:
+                    pass
+            
+            # 3. Fallback to any manually created transcript
+            if not transcript:
+                try:
+                    transcript = next((t for t in transcript_list if not t.is_generated), None)
+                except:
+                    pass
+            
+            # 4. Fallback to absolutely any transcript available
+            if not transcript:
+                try:
+                    transcript = next(iter(transcript_list))
+                except StopIteration:
+                    return None
+                    
+            if not transcript:
+                return None
+                
             data = transcript.fetch()
+            
             if hasattr(data, 'snippets'):
                 return " ".join([t.text for t in data.snippets])
             elif isinstance(data, list):
-                return " ".join([t['text'] for t in data])
+                if len(data) > 0 and hasattr(data[0], 'text'):
+                    return " ".join([t.text for t in data])
+                else:
+                    return " ".join([t.get('text', '') for t in data if 'text' in t])
             return None
         except Exception:
-            # Fallback to any transcript
-            try:
-                api = YouTubeTranscriptApi()
-                transcript_list = api.list(video_id)
-                transcript = next(iter(transcript_list))
-                data = transcript.fetch()
-                if hasattr(data, 'snippets'):
-                    return " ".join([t.text for t in data.snippets])
-                elif isinstance(data, list):
-                    return " ".join([t['text'] for t in data])
-                return None
-            except:
-                try:
-                    api = YouTubeTranscriptApi()
-                    data = api.fetch(video_id)
-                    if hasattr(data, 'snippets'):
-                        return " ".join([t.text for t in data.snippets])
-                    elif isinstance(data, list):
-                        return " ".join([t['text'] for t in data])
-                except:
-                    return None
+            return None
 
-    def get_youtube_comments(self, video_url, max_comments=None):
+    def get_youtube_comments(self, video_url, max_comments=100, selection_strategy="From top (Fastest)", keywords=None):
         downloader = YoutubeCommentDownloader()
-        comments = downloader.get_comments_from_url(video_url, sort_by=1) # 1 = sorted by newest
-        results = []
-        count = 0
-        for comment in comments:
+        
+        sort_by = 1 # 1 = newest
+        is_fast_mode = selection_strategy.startswith("From top")
+        comments_generator = downloader.get_comments_from_url(video_url, sort_by=sort_by)
+        
+        fetched_comments = []
+        buffer_size = max_comments if is_fast_mode else min(max_comments * 4, 1000)
+        
+        for comment in comments_generator:
             if self.is_limit_reached:
                 break
-            if max_comments is not None and count >= max_comments:
+            fetched_comments.append(comment)
+            if len(fetched_comments) >= buffer_size:
+                break
+                
+        if selection_strategy.startswith("From top"):
+            selected_comments = fetched_comments[:max_comments]
+        elif selection_strategy == "From bottom":
+            selected_comments = list(reversed(fetched_comments))[:max_comments]
+        elif selection_strategy == "Random":
+            import random
+            if len(fetched_comments) <= max_comments:
+                selected_comments = fetched_comments
+            else:
+                selected_comments = random.sample(fetched_comments, max_comments)
+        elif selection_strategy == "By likes":
+            def get_votes(c):
+                v = c.get('votes', '0')
+                if isinstance(v, str):
+                    v = v.replace(',', '').replace('.', '')
+                    if v.endswith('K'): v = float(v[:-1]) * 1000
+                    elif v.endswith('M'): v = float(v[:-1]) * 1000000
+                    try: return int(float(v))
+                    except: return 0
+                return int(v)
+            selected_comments = sorted(fetched_comments, key=get_votes, reverse=True)[:max_comments]
+        elif selection_strategy == "By keyword":
+            if not keywords:
+                selected_comments = fetched_comments[:max_comments]
+            else:
+                kws_lower = [k.strip().lower() for k in keywords if k.strip()]
+                scored_comments = []
+                for c in fetched_comments:
+                    text_lower = c.get('text', '').lower()
+                    score = sum(1 for kw in kws_lower if kw in text_lower)
+                    if score > 0:
+                        scored_comments.append((score, c))
+                scored_comments.sort(key=lambda x: x[0], reverse=True)
+                selected_comments = [c[1] for c in scored_comments][:max_comments]
+        else:
+            selected_comments = fetched_comments[:max_comments]
+            
+        results = []
+        for comment in selected_comments:
+            if self.is_limit_reached:
                 break
             
             text = comment.get('text', '')
             author = comment.get('author', 'Unknown')
             time_text = comment.get('time', '')
             
-            # Create a pseudo-XML structure for the comment
             comment_str = f"<comment author=\"{author}\" date=\"{time_text}\">\n{text}\n</comment>\n"
             results.append(comment_str)
-            count += 1
             
             words = count_words(text)
             self.current_words += words
             if self.current_words >= self.limit_words:
                 self.is_limit_reached = True
                 break
+                
         return "".join(results)
 
+    def is_likely_sentence(self, text):
+        text = text.strip()
+        if len(text) < 15:
+            return False
+        if not re.search(r'[.!?][\"\'\”\’\)]*$', text):
+            return False
+        words = text.split()
+        if len(words) < 3:
+            return False
+        return True
+
     def scrape_url(self, url):
+        # Layer 1: Direct Fetch with Chrome 121 Headers & Referer
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Referer': 'https://www.google.com/',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="121", "Google Chrome";v="121"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'cross-site',
+            'Upgrade-Insecure-Requests': '1'
+        }
+        
+        html = None
         try:
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-            # Use stream=True so we can check headers before downloading the whole payload (like a huge PDF)
-            resp = requests.get(url, headers=headers, timeout=10, verify=False, stream=True)
-            if resp.status_code == 200:
-                content_type = resp.headers.get('Content-Type', '').lower()
-                if 'text/html' not in content_type and 'text/plain' not in content_type:
-                    resp.close()
-                    return None
+            try:
+                resp = requests.get(url, headers=headers, timeout=10)
+            except requests.exceptions.SSLError:
+                resp = requests.get(url, headers=headers, timeout=10, verify=False)
                 
-                try:
-                    import trafilatura
-                    # trafilatura is extremely sophisticated at ignoring boilerplate (navs, footers, ads)
-                    text = trafilatura.extract(resp.content, include_comments=False, include_tables=False)
-                except ImportError:
-                    text = None
-                    
-                if text:
-                    return text
-                else:
-                    # Fallback to BeautifulSoup if trafilatura fails to find main article content
-                    soup = BeautifulSoup(resp.content, 'html.parser')
-                    # Remove scripts, styles, and common boilerplate tags
-                    for script in soup(["script", "style", "nav", "footer", "header", "aside"]):
-                        script.extract()
-                    text = soup.get_text(separator=' ')
-                    # Basic cleaning
-                    lines = (line.strip() for line in text.splitlines())
-                    chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-                    text = '\n'.join(chunk for chunk in chunks if chunk)
-                    return text
+            if resp.status_code == 200:
+                if resp.encoding and resp.encoding.lower() == 'iso-8859-1':
+                    resp.encoding = resp.apparent_encoding
+                html = resp.text
         except Exception as e:
-            print(f"Scrape error for {url}: {e}")
+            print(f"Scrape Layer 1 failed for {url[:50]}: {e}")
+
+        if html:
+            soup = BeautifulSoup(html, 'html.parser')
+            for el in soup(['script', 'style', 'nav', 'header', 'footer', 'aside', 'noscript', 'iframe']):
+                el.extract()
+            paragraphs = soup.find_all('p')
+            clean_text = []
+            for p in paragraphs:
+                text = p.get_text(separator=' ').strip()
+                text = re.sub(r'\s+', ' ', text)
+                if self.is_likely_sentence(text):
+                    clean_text.append(text)
+            
+            if clean_text:
+                return '\n'.join(clean_text)
+            else:
+                text = soup.get_text(separator='\n')
+                lines = [line.strip() for line in text.splitlines() if line.strip()]
+                valid_lines = [l for l in lines if self.is_likely_sentence(l)]
+                if valid_lines:
+                    return '\n'.join(valid_lines)
+                elif lines:
+                    chunks = [l for l in lines if len(l) > 30]
+                    if chunks:
+                        return '\n'.join(chunks)
+
+        # Layer 2: Free Jina AI Reader Proxy (Bypasses Cloudflare & Datacenter IP Blocks)
+        try:
+            jina_url = 'https://r.jina.ai/' + url
+            resp = requests.get(jina_url, timeout=15)
+            if resp.status_code == 200 and resp.text:
+                lines = [line.strip() for line in resp.text.splitlines() if line.strip()]
+                clean_lines = [l for l in lines if not l.startswith('Title:') and not l.startswith('URL Source:') and len(l) > 20]
+                if clean_lines:
+                    return '\n'.join(clean_lines)
+        except Exception as e:
+            print(f"Scrape Layer 2 (Jina) failed for {url[:50]}: {e}")
+
+        # Layer 3: Google Translate Proxy Fallback
+        try:
+            gt_url = f"https://translate.google.com/translate?sl=auto&tl=id&u={url}"
+            gt_headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/121.0.0.0'}
+            resp = requests.get(gt_url, headers=gt_headers, timeout=15)
+            if resp.status_code == 200 and resp.text:
+                soup = BeautifulSoup(resp.text, 'html.parser')
+                for el in soup(['script', 'style', 'nav', 'header', 'footer', 'aside', 'noscript', 'iframe']):
+                    el.extract()
+                paragraphs = soup.find_all('p')
+                clean_text = []
+                for p in paragraphs:
+                    text = p.get_text(separator=' ').strip()
+                    text = re.sub(r'\s+', ' ', text)
+                    if self.is_likely_sentence(text):
+                        clean_text.append(text)
+                if clean_text:
+                    return '\n'.join(clean_text)
+        except Exception as e:
+            print(f"Scrape Layer 3 (Google Translate) failed for {url[:50]}: {e}")
+
         return None
+
+    def score_domain(self, url):
+        score = 0
+        url_lower = url.lower()
+        # High priority (text rich)
+        if any(d in url_lower for d in ['wikipedia.org', 'medium.com', 'wordpress.com', 'bbc.com', 'cnn.com', 'nytimes.com', 'kompas.com', 'detik.com', 'tribunnews.com']):
+            score += 10
+        # Low priority (PDFs, JS heavy, sparse text)
+        if any(d in url_lower for d in ['academia.edu', 'scribd.com', 'researchgate.net', 'facebook.com', 'instagram.com', 'twitter.com', 'x.com', 'tiktok.com', 'youtube.com']):
+            score -= 10
+        return score
+
     def fetch_keyword_links(self, keywords, num_links=25, language=None, progress_callback=None):
-        import xml.etree.ElementTree as ET
-        import urllib.parse
-        import time
+        query_words = keywords.copy() if isinstance(keywords, list) else [keywords]
+        query = " ".join(query_words)
         
-        query = " ".join(keywords)
-        
-        # Build language params for Bing News
         lang_param = "&mkt=en-US"
         if language:
             if language.lower() == "indonesian":
@@ -149,28 +283,26 @@ class OnlineCorpusBuilder:
         links = set()
         headers = {'User-Agent': 'Mozilla/5.0'}
         
-        # Bing News RSS returns ~10 links per page. Paginate to get up to num_links.
         page = 0
-        while len(links) < num_links and page < 10:  # Max 10 pages
+        while len(links) < num_links and page < 10:
             first_param = f"&first={page * 10 + 1}" if page > 0 else ""
             url = f"https://www.bing.com/news/search?q={query}&format=rss{lang_param}{first_param}"
             
             try:
-                if progress_callback: 
-                    progress_callback((page + 1) / 10.0, f"Searching Bing News (Page {page + 1})...")
-                    
+                if progress_callback: progress_callback((page + 1) / 10.0, f"Searching Bing News (Page {page + 1})...")
                 resp = requests.get(url, headers=headers, timeout=10)
                 if resp.status_code == 200:
+                    import xml.etree.ElementTree as ET
+                    import urllib.parse
                     root = ET.fromstring(resp.content)
                     items = root.findall('.//item')
                     
                     if not items:
-                        break # No more results
+                        break
                         
                     for item in items:
                         link = item.find('link').text
                         if link:
-                            # Extract the actual URL from Bing's redirect link
                             parsed = urllib.parse.urlparse(link)
                             qs = urllib.parse.parse_qs(parsed.query)
                             if 'url' in qs:
@@ -179,66 +311,116 @@ class OnlineCorpusBuilder:
                             elif 'bing.com' not in link:
                                 links.add(link)
                 else:
-                    break # Stop on error
+                    break
             except Exception as e:
                 print(f"RSS Search error: {e}")
                 break
                 
             page += 1
-            time.sleep(1) # Be nice to Bing
+            import time
+            time.sleep(1)
             
-        # Return exactly the number of links requested
+        links_list = list(links)
+        scored_links = [(link, self.score_domain(link)) for link in links_list]
+        scored_links.sort(key=lambda x: x[1], reverse=True)
         
-        filtered_links = list(links)[:num_links]
-        
-        # Prioritize easy-to-scrape websites and penalize hard ones
-        hard_domains = ['scribd', 'yumpu', 'academia', 'researchgate', 'facebook', 'twitter', 'instagram', 'tiktok', 'x.com', 'pinterest']
-        easy_domains = ['wikipedia', 'medium', 'blogspot', 'wordpress', 'kompas', 'detik', 'tribunnews', 'bbc', 'cnn', 'tempo', 'kumparan', 'suara']
-        
-        def score_link(url):
-            url_lower = url.lower()
-            if any(domain in url_lower for domain in hard_domains):
-                return 2  # Hard to scrape (bottom)
-            if any(domain in url_lower for domain in easy_domains):
-                return 0  # Easy to scrape (top)
-            return 1      # Neutral (middle)
-            
-        filtered_links.sort(key=score_link)
-        return filtered_links
+        return [link for link, score in scored_links][:num_links]
 
-    def scrape_keyword_links(self, keywords, links, min_match=2):
-        found_data = []
-        for link in links:
+    def scrape_selected_links(self, links, keywords, progress_callback=None):
+        success_logs = []
+        for i, link in enumerate(links):
             if self.is_limit_reached: break
+            if progress_callback: progress_callback(i/len(links), f"Scraping {link[:50]}...")
             
             content = self.scrape_url(link)
             if content:
-                # Count matches
-                matches = sum(1 for kw in keywords if kw.lower() in content.lower())
-                if matches >= min_match:
-                    found_data.append((link, content))
-                    
-                    words = count_words(content)
-                    self.current_words += words
-                    if self.current_words >= self.limit_words:
-                        self.is_limit_reached = True
-                        break
-        return found_data
-        return found_data
+                kw_str = ','.join(keywords) if isinstance(keywords, list) else str(keywords)
+                self.downloaded_files.append({
+                    "filename": f"kw_{i}.txt", 
+                    "content": f"<text url=\"{link}\" keywords=\"{kw_str}\">\n{content}\n</text>",
+                    "url": link
+                })
+                words = count_words(content)
+                self.current_words += words
+                success_logs.append(link)
+                if self.current_words >= self.limit_words:
+                    self.is_limit_reached = True
+                    break
+        return success_logs
 
-
+def apply_selection_strategy(items, max_items, strategy, keywords, extract_text_func, extract_likes_func):
+    """
+    Applies the selection strategy (random, likes, keyword, etc) to a list of items.
+    """
+    if not items:
+        return []
+    
+    items = list(items)
+    
+    if strategy == 'From top (Fastest)':
+        return items[:max_items]
+        
+    if strategy == 'From bottom':
+        return list(reversed(items))[:max_items]
+        
+    if strategy == 'Random':
+        import random
+        random.shuffle(items)
+        return items[:max_items]
+        
+    if strategy == 'By likes':
+        items.sort(key=lambda x: extract_likes_func(x) or 0, reverse=True)
+        return items[:max_items]
+        
+    if strategy == 'By keyword' and keywords:
+        kws = [k.lower() for k in keywords if k.strip()]
+        if not kws:
+            return items[:max_items]
+            
+        def score_item(item):
+            text = extract_text_func(item).lower()
+            return sum(1 for kw in kws if kw in text)
+            
+        items.sort(key=score_item, reverse=True)
+        return items[:max_items]
+        
+    return items[:max_items]
 
 def build_online_corpus(mode_type, params, progress_callback=None):
     """
-    mode_type: 'youtube', 'links', 'keyword_fetch', 'keyword_scrape', 'mastodon', 'bluesky'
+    mode_type: 'detik', 'youtube', 'links', 'keyword_fetch', 'keyword_scrape', 'keyword_scrape_selected', 'mastodon', 'bluesky'
     params: dict with necessary parameters
     """
     builder = OnlineCorpusBuilder(limit_words=500000)
     warning = None
     
-    if mode_type == "youtube":
+    if mode_type == "detik":
+        from pipeline.detik_scraper import build_detik_corpus_xml
+        scrape_mode = params.get('scrape_mode', 'tag')
+        tag = params.get('tag', 'ppds')
+        section_target = params.get('section_target', 'news')
+        target_count = params.get('target_count', 100)
+        start_date = params.get('start_date')
+        end_date = params.get('end_date')
+        xml_content, df_summary, total_count = build_detik_corpus_xml(
+            tag=tag, 
+            section_target=section_target, 
+            scrape_mode=scrape_mode, 
+            target_count=target_count, 
+            start_date=start_date,
+            end_date=end_date,
+            progress_callback=progress_callback
+        )
+        if xml_content:
+            target_label = section_target if scrape_mode == 'section' else tag
+            builder.add_content(f"detik_{scrape_mode}_{target_label}_corpus.xml", xml_content)
+        else:
+            warning = f"Could not retrieve Detik.com articles for {scrape_mode} '{section_target if scrape_mode == 'section' else tag}'."
+        return builder.downloaded_files, warning
+        
+    elif mode_type == "youtube":
         url = params.get('url')
-        mode = params.get('mode', 'both') # transcript, comments, both
+        mode = params.get('mode', 'both')
         
         video_id_match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11}).*', url)
         video_id = video_id_match.group(1) if video_id_match else None
@@ -256,20 +438,34 @@ def build_online_corpus(mode_type, params, progress_callback=None):
         
         if not builder.is_limit_reached and mode in ('comments', 'both'):
             if progress_callback: progress_callback(0.5, "Downloading comments...")
-            max_comments = params.get('max_comments')
-            comments = builder.get_youtube_comments(url, max_comments=max_comments)
+            max_comments = params.get('max_comments', 100)
+            selection_strategy = params.get('selection_strategy', 'From top (Fastest)')
+            keywords = params.get('keywords', [])
+            comments = builder.get_youtube_comments(
+                url, 
+                max_comments=max_comments, 
+                selection_strategy=selection_strategy,
+                keywords=keywords
+            )
             if comments:
                 builder.add_content(f"yt_{video_id}_comments.xml", f"<text type=\"comments\" video_id=\"{video_id}\" url=\"{url}\">\n{comments}\n</text>")
+        return builder.downloaded_files, warning
     
     elif mode_type == "links":
         links = params.get('links', [])
+        success_logs = []
         for i, link in enumerate(links[:50]):
             if builder.is_limit_reached: break
-            if progress_callback: progress_callback(i/len(links), f"Scraping {link}...")
+            if progress_callback: progress_callback(i/len(links[:50]), f"Scraping {i+1}/{len(links[:50])}: {link[:40]}...")
             content = builder.scrape_url(link)
             if content:
                 builder.add_content(f"link_{i}.txt", f"<text url=\"{link}\" source=\"link_collection\">\n{content}\n</text>")
                 builder.downloaded_files[-1]['url'] = link
+                success_logs.append(link)
+        warning = f"Successfully scraped {len(success_logs)} out of {len(links[:50])} links."
+        if builder.is_limit_reached:
+            warning += " Limit reached (max 500,000 words)."
+        return builder.downloaded_files, warning
     
     elif mode_type == "keyword_fetch":
         keywords = params.get('keywords', [])
@@ -277,14 +473,14 @@ def build_online_corpus(mode_type, params, progress_callback=None):
         language = params.get('language', 'English')
         return builder.fetch_keyword_links(keywords, num_links, language, progress_callback), None
 
-    elif mode_type == "keyword_scrape":
+    elif mode_type in ("keyword_scrape", "keyword_scrape_selected"):
         keywords = params.get('keywords', [])
-        links_to_scrape = params.get('links', [])
-        min_match = max(2, len(keywords) - 2)
-        found = builder.scrape_keyword_links(keywords, links_to_scrape, min_match)
-        for i, (link, content) in enumerate(found):
-            # Content already added in keyword_search for limit checking
-            builder.downloaded_files.append({"filename": f"kw_{i}.txt", "content": f"<text url=\"{link}\" keywords=\"{','.join(keywords)}\">\n{content}\n</text>", "url": link})
+        links = params.get('links', [])
+        success_logs = builder.scrape_selected_links(links, keywords, progress_callback)
+        warning = f"Successfully scraped {len(success_logs)} out of {len(links)} selected links."
+        if builder.is_limit_reached:
+            warning += " Limit reached (max 500,000 words)."
+        return builder.downloaded_files, warning
 
     elif mode_type == "mastodon":
         urls = params.get('urls', [])
@@ -301,7 +497,6 @@ def build_online_corpus(mode_type, params, progress_callback=None):
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             }
             
-            # Check if it is a specific status ID or a profile
             id_match = re.search(r'/(?:statuses|@[\w.-]+)/(\d+)', url)
             if not id_match:
                 id_match = re.search(r'/(\d+)/?$', url)
@@ -310,19 +505,16 @@ def build_online_corpus(mode_type, params, progress_callback=None):
             if id_match:
                 status_ids.append(id_match.group(1))
             else:
-                # Check for profile URL, e.g. /@username
                 profile_match = re.search(r'/@([\w.-]+)', url)
                 if not profile_match: continue
                 username = profile_match.group(1)
                 
                 try:
-                    # 1. Lookup account ID
                     lookup_url = f"https://{domain}/api/v1/accounts/lookup?acct={username}"
                     lr = requests.get(lookup_url, headers=headers, timeout=10)
                     if lr.status_code == 200:
                         acct_id = lr.json().get('id')
                         if acct_id:
-                            # 2. Get latest 10 statuses
                             statuses_url = f"https://{domain}/api/v1/accounts/{acct_id}/statuses?limit=10"
                             sr = requests.get(statuses_url, headers=headers, timeout=10)
                             if sr.status_code == 200:
@@ -370,7 +562,16 @@ def build_online_corpus(mode_type, params, progress_callback=None):
                         add_masto_status(ancestor, "ancestor")
                     add_masto_status(status_data, "post")
                 if mode in ('replies', 'both'):
-                    for descendant in descendants:
+                    max_comments = params.get('max_comments', 100)
+                    selection_strategy = params.get('selection_strategy', 'From top (Fastest)')
+                    keywords = params.get('keywords', [])
+                    
+                    filtered_desc = apply_selection_strategy(
+                        descendants, max_comments, selection_strategy, keywords,
+                        extract_text_func=lambda x: clean_masto_html(x.get('content', '')),
+                        extract_likes_func=lambda x: x.get('favourites_count', 0)
+                    )
+                    for descendant in filtered_desc:
                         add_masto_status(descendant, "reply")
                 xml_parts.append('</text>')
                 xml_content = "\n".join(xml_parts)
@@ -388,7 +589,6 @@ def build_online_corpus(mode_type, params, progress_callback=None):
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             }
             
-            # Check if it is a specific post or a profile
             match_post = re.search(r'profile/([^/]+)/post/([^/]+)', url)
             posts_to_fetch = []
             
@@ -402,13 +602,11 @@ def build_online_corpus(mode_type, params, progress_callback=None):
                 handle = match_profile.group(1)
                 
                 try:
-                    # 1. Resolve handle to DID
                     resolve_url = f"https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle={handle}"
                     rr = requests.get(resolve_url, headers=headers, timeout=10)
                     if rr.status_code == 200:
                         did = rr.json().get('did')
                         if did:
-                            # 2. Get latest 10 posts
                             feed_url = f"https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor={did}&limit=10"
                             fr = requests.get(feed_url, headers=headers, timeout=10)
                             if fr.status_code == 200:
@@ -481,13 +679,22 @@ def build_online_corpus(mode_type, params, progress_callback=None):
                     if main_post:
                         add_bsky_post(main_post, "post")
                 if mode in ('replies', 'both'):
-                    for descendant in descendants:
+                    max_comments = params.get('max_comments', 100)
+                    selection_strategy = params.get('selection_strategy', 'From top (Fastest)')
+                    keywords = params.get('keywords', [])
+                    
+                    filtered_desc = apply_selection_strategy(
+                        descendants, max_comments, selection_strategy, keywords,
+                        extract_text_func=lambda x: x.get('record', {}).get('text', ''),
+                        extract_likes_func=lambda x: x.get('likeCount', 0)
+                    )
+                    for descendant in filtered_desc:
                         add_bsky_post(descendant, "reply")
                 xml_parts.append('</text>')
                 xml_content = "\n".join(xml_parts)
                 builder.add_content(f"bluesky_{rkey}.xml", xml_content)
 
     if builder.is_limit_reached:
-        warning = "Experimental limit reached (max 100,000 words). Corpus built with partial content."
+        warning = "Experimental limit reached (max 500,000 words). Corpus built with partial content."
         
     return builder.downloaded_files, warning

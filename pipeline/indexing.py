@@ -112,9 +112,11 @@ def get_connection(read_only=False, allow_fallback=True):
                 raise e
             
             try:
+                import multiprocessing
+                cpus = max(2, multiprocessing.cpu_count())
                 st.session_state.duckdb_conn.execute("SET preserve_insertion_order=false")
-                st.session_state.duckdb_conn.execute("PRAGMA memory_limit='512MB'")
-                st.session_state.duckdb_conn.execute("PRAGMA threads=1")
+                st.session_state.duckdb_conn.execute("PRAGMA memory_limit='2GB'")
+                st.session_state.duckdb_conn.execute(f"PRAGMA threads={cpus}")
             except:
                 pass
                 
@@ -124,6 +126,11 @@ def get_connection(read_only=False, allow_fallback=True):
         # Fallback for background scripts
         conn = duckdb.connect(':memory:')
         try:
+            import multiprocessing
+            cpus = max(2, multiprocessing.cpu_count())
+            conn.execute("SET preserve_insertion_order=false")
+            conn.execute("PRAGMA memory_limit='2GB'")
+            conn.execute(f"PRAGMA threads={cpus}")
             conn.execute("INSTALL json; LOAD json;")
         except:
             pass

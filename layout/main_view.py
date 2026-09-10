@@ -443,10 +443,13 @@ def render_word_tracker_tab(where_clause="1=1", params=()):
     }
     bg, fg, border = label_colors.get(label, ("#f5f5f5", "#333333", "#cccccc"))
     
+    cv_tt = vol_result.get('cv_tooltip', desc)
+    
     st.markdown(f"""
-    <div style="background-color: {bg}; border-left: 6px solid {border}; padding: 16px 20px; border-radius: 6px; margin-bottom: 20px;">
+    <div title="{cv_tt}" style="background-color: {bg}; border-left: 6px solid {border}; padding: 16px 20px; border-radius: 6px; margin-bottom: 15px; cursor: help;">
         <span style="font-size: 26px; font-weight: bold; color: {fg};">{label}</span>
         <div style="font-size: 15px; color: #444; margin-top: 6px;">{desc}</div>
+        <div style="font-size: 12px; color: #666; margin-top: 4px; font-style: italic;">💡 Hover over this banner or badges for CV calculation details & score thresholds</div>
     </div>
     """, unsafe_allow_html=True)
     
@@ -457,6 +460,24 @@ def render_word_tracker_tab(where_clause="1=1", params=()):
     m3.metric("Mean PMW", f"{vol_result['mean_pmw']:.2f}")
     m4.metric("Max PMW", f"{vol_result['max_pmw']:.2f}")
     m5.metric("Min PMW", f"{vol_result['min_pmw']:.2f}")
+
+    with st.expander("ℹ️ **What is CV Score & How is CV counted?**", expanded=False):
+        std_dev_val = vol_result.get('std_dev', 0.0)
+        mean_pmw_val = vol_result.get('mean_pmw', 0.0)
+        st.markdown(f"""
+        **Coefficient of Variation (CV)** measures the relative fluctuation or stability of a word's usage frequency across different time periods.
+
+        #### 📊 How CV is Counted / Calculated:
+        $$\\text{{CV Score}} = \\frac{{\\text{{Standard Deviation of PMW }} (\\sigma)}}{{\\text{{Mean PMW }} (\\mu)}} = \\frac{{{std_dev_val:.2f}}}{{{mean_pmw_val:.2f}}} = \\mathbf{{{score:.3f}}}$$
+
+        - **Mean PMW ($\\mu$)**: The average usage frequency per million words across all time periods ({mean_pmw_val:.2f}).
+        - **Standard Deviation ($\\sigma$)**: Measures how widely frequencies spread out around the mean ({std_dev_val:.2f}).
+
+        #### 🎯 Volatility Score Ranges & Interpretation:
+        - 🟢 **Stable / Low Volatility** ($\\text{{CV}} < 0.40$): Word usage is steady and consistent across time.
+        - 🟡 **Moderately Volatile** ($0.40 \\le \\text{{CV}} < 0.85$): Usage shifts noticeably between time periods.
+        - 🔴 **Highly Volatile** ($\\text{{CV}} \\ge 0.85$): Usage experiences sharp spikes or steep drop-offs.
+        """)
     
     st.divider()
     
@@ -739,8 +760,9 @@ def render_multiword_view(query, where_clause, params, stop_words, collocate_fil
         }
         bg, fg, border = label_styles.get(v_label, ("#f5f5f5", "#333333", "#cccccc"))
         
+        v_tt = vol_res.get('cv_tooltip', f"Volatility across {selected_time_attr}: {v_desc}")
         vol_band_parts = [
-            f'<div title="Volatility across {selected_time_attr}: {v_desc}" style="display:inline-flex; flex-direction:column; align-items:center; background:{bg}; border:1px solid {border}; padding:6px 10px; border-radius:4px; cursor:help;">',
+            f'<div title="{v_tt}" style="display:inline-flex; flex-direction:column; align-items:center; background:{bg}; border:1px solid {border}; padding:6px 10px; border-radius:4px; cursor:help;">',
             f'<span style="font-size:12px; color:#666; margin-bottom:4px;">Volatility</span>',
             f'<span style="font-weight:bold; font-size:13px; color:{fg};">{v_label}</span>',
             f'</div>'
@@ -1172,10 +1194,11 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                     }
                     bg, fg, border = label_styles.get(v_label, ("#f5f5f5", "#333333", "#cccccc"))
                     
+                    v_tt = vol_res.get('cv_tooltip', f"Volatility across {selected_time_attr}: {v_desc}")
                     vol_band_parts = [
-                        f"<div title=\"Volatility across {selected_time_attr}: {v_desc}\" style=\"display:inline-flex; flex-direction:column; align-items:center; background:{bg}; border:1px solid {border}; padding:6px 10px; border-radius:4px; cursor:help;\">",
-                        f"<span style=\"font-size:12px; color:#666; margin-bottom:4px;\">Volatility</span>",
-                        f"<span style=\"font-weight:bold; font-size:13px; color:{fg};\">{v_label}</span>",
+                        f'<div title="{v_tt}" style="display:inline-flex; flex-direction:column; align-items:center; background:{bg}; border:1px solid {border}; padding:6px 10px; border-radius:4px; cursor:help;">',
+                        f'<span style="font-size:12px; color:#666; margin-bottom:4px;">Volatility</span>',
+                        f'<span style="font-weight:bold; font-size:13px; color:{fg};">{v_label}</span>',
                         f"</div>"
                     ]
                     vol_band_html = "".join(vol_band_parts)
@@ -1290,7 +1313,10 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                         v_score = vol_res['volatility_score']
                         v_desc = vol_res['description']
                         st.markdown(f"### {v_label}")
-                        st.caption(f"{v_desc} (CV = **{v_score:.3f}**, Mean PMW = **{vol_res['mean_pmw']:.2f}**)")
+                        std_d = vol_res.get('std_dev', 0.0)
+                        mean_p = vol_res.get('mean_pmw', 0.0)
+                        st.caption(f"{v_desc} (CV = **{v_score:.3f}** = StdDev **{std_d:.2f}** / Mean PMW **{mean_p:.2f}**)")
+                        st.info("💡 **What is CV?** Coefficient of Variation (CV = StdDev / Mean PMW) measures relative usage fluctuation over time. Scores: <0.40 (🟢 Stable), 0.40–0.84 (🟡 Moderate), ≥0.85 (🔴 Highly Volatile).")
                         
                         df_ts_s = vol_res['time_series_df']
                         if not df_ts_s.empty:

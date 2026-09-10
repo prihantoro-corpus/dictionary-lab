@@ -23,4 +23,12 @@ test_root_tag.txt
 *.duckdb
 !BAWE.duckdb
 !corpora/*.duckdb
+corpora/swahili_*
+corpora/afya_*
+corpora/dictionary.duckdb
+corpora/Swahili Corpus/
+*.xml
+*.pdf
+~$*
+merge_swahili.py
 *.duckdb.wal

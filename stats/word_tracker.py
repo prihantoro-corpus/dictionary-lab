@@ -114,6 +114,10 @@ def calculate_word_volatility(token: str, time_attr: str, where_clause="1=1", pa
             label = "⚪ Insufficient Time Bins"
             badge_color = "gray"
             description = "At least 2 distinct time periods are required to calculate volatility across time."
+            std_dev = 0.0
+            mean_pmw = 0.0
+            cv_explanation = "CV (Coefficient of Variation) requires at least 2 distinct time periods."
+            cv_tooltip = f"Volatility across {time_attr}: Insufficient data (at least 2 time periods required)."
         else:
             mean_pmw = sum(pmw_values) / num_periods
             variance = sum((x - mean_pmw) ** 2 for x in pmw_values) / num_periods
@@ -136,6 +140,22 @@ def calculate_word_volatility(token: str, time_attr: str, where_clause="1=1", pa
                 label = "🟢 Stable / Low Volatility"
                 badge_color = "green"
                 description = f"Consistent usage across time periods (CV = {cv:.2f}). Usage remains steady."
+
+            cv_explanation = (
+                f"CV Score = {cv:.3f} (StdDev {std_dev:.2f} / Mean {mean_pmw:.2f}). "
+                "CV (Coefficient of Variation) measures relative frequency fluctuation across time."
+            )
+            cv_tooltip = (
+                f"Volatility across {time_attr}: {description}&#10;&#10;"
+                f"• What is CV Score?&#10;"
+                f"CV (Coefficient of Variation) measures relative frequency volatility across time.&#10;&#10;"
+                f"• How is CV counted?&#10;"
+                f"CV = StdDev / Mean PMW ({std_dev:.2f} / {mean_pmw:.2f} = {cv:.3f}).&#10;&#10;"
+                f"• Score Ranges:&#10;"
+                f"  🟢 CV < 0.40 : Stable / Low Volatility&#10;"
+                f"  🟡 0.40 <= CV < 0.85 : Moderately Volatile&#10;"
+                f"  🔴 CV >= 0.85 : Highly Volatile"
+            )
                 
         df_series = pd.DataFrame(time_series)
         
@@ -145,10 +165,13 @@ def calculate_word_volatility(token: str, time_attr: str, where_clause="1=1", pa
             'time_attr': time_attr,
             'volatility_label': label,
             'volatility_score': volatility_score,
+            'std_dev': round(std_dev, 2),
             'badge_color': badge_color,
             'description': description,
+            'cv_explanation': cv_explanation,
+            'cv_tooltip': cv_tooltip,
             'num_periods': num_periods,
-            'mean_pmw': round(sum(pmw_values)/len(pmw_values), 2) if pmw_values else 0.0,
+            'mean_pmw': round(mean_pmw, 2) if num_periods >= 2 else 0.0,
             'max_pmw': round(max(pmw_values), 2) if pmw_values else 0.0,
             'min_pmw': round(min(pmw_values), 2) if pmw_values else 0.0,
             'time_series_df': df_series
