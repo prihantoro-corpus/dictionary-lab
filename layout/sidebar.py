@@ -756,8 +756,30 @@ def render():
     meta_keys = get_metadata_keys(active_corpora)
     selected_metadata = {}
     
+    # ⏱️ Select Feature of Time Attribute in Sidebar
+    time_candidate_options = list(meta_keys)
+    for col in ['corpus', 'doc_id', 'file_id']:
+        if col not in time_candidate_options:
+            time_candidate_options.append(col)
+            
+    if time_candidate_options:
+        if 'selected_time_attribute' not in st.session_state or st.session_state['selected_time_attribute'] not in time_candidate_options:
+            # Prioritize time-like key if present
+            time_words = ['year', 'date', 'month', 'time', 'period', 'decade']
+            prioritized = [k for k in time_candidate_options if any(tw in k.lower() for tw in time_words)]
+            st.session_state['selected_time_attribute'] = prioritized[0] if prioritized else time_candidate_options[0]
+            
+        with st.sidebar.expander("⏱️ Feature of Time (Attribute)", expanded=True):
+            st.caption("Select metadata or structural field to group time periods:")
+            st.radio(
+                "Select feature of time:",
+                options=time_candidate_options,
+                key="selected_time_attribute",
+                label_visibility="collapsed"
+            )
+            
     if not meta_keys:
-        st.sidebar.caption("No metadata found in loaded corpora.")
+        st.sidebar.caption("No custom JSON metadata found in loaded corpora.")
     
     for key in meta_keys:
         values = get_metadata_values(key, active_corpora)

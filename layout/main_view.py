@@ -388,6 +388,9 @@ def render_word_tracker_tab(where_clause="1=1", params=()):
     if not available_attrs:
         available_attrs = ['corpus', 'doc_id', 'file_id']
         
+    if 'selected_time_attribute' not in st.session_state or st.session_state['selected_time_attribute'] not in available_attrs:
+        st.session_state['selected_time_attribute'] = available_attrs[0]
+        
     st.subheader("1. Select Feature of Time")
     st.caption("Choose metadata key or structural attribute to group time periods:")
     
@@ -395,7 +398,7 @@ def render_word_tracker_tab(where_clause="1=1", params=()):
         "Feature of Time (Attribute)",
         options=available_attrs,
         horizontal=True,
-        key="word_tracker_time_radio"
+        key="selected_time_attribute"
     )
     
     st.divider()
