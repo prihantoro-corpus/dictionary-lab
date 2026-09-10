@@ -27,6 +27,8 @@ corpora/swahili_*
 corpora/afya_*
 corpora/dictionary.duckdb
 corpora/Swahili Corpus/
+corpora/en-bppt-tagged.duckdb
+corpora/id-bppt-tagged.duckdb
 *.xml
 *.pdf
 ~$*
