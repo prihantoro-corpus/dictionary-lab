@@ -112,6 +112,27 @@ def get_metadata_values(key, corpora=None):
             conn.close()
 
 def render():
+    # Inject CSS fix for selectbox dropdown popover clickability and top z-index
+    st.markdown(
+        """
+        <style>
+        div[data-baseweb="select"] {
+            z-index: 1000 !important;
+            pointer-events: auto !important;
+        }
+        div[data-baseweb="popover"], div[data-baseweb="menu"], div[role="listbox"], ul[role="listbox"] {
+            z-index: 999999 !important;
+            pointer-events: auto !important;
+        }
+        li[role="option"] {
+            cursor: pointer !important;
+            pointer-events: auto !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+    
     # Manual Link at the top
     st.sidebar.markdown(
         '<div style="text-align: left; margin-bottom: 10px;">'
@@ -164,21 +185,35 @@ def render():
                 st.rerun()
 
         if st.session_state['corpus_selection_mode'] is not None:
+            lang_options = ['English', 'Indonesian', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other']
             if not is_parallel:
                 st.caption("Select Source Language:")
-                st.session_state['corpus_language'] = st.selectbox(
+                if 'corpus_language' not in st.session_state or st.session_state['corpus_language'] not in lang_options:
+                    st.session_state['corpus_language'] = 'English'
+                st.radio(
                     "Source Language", 
-                    ['English', 'Indonesian', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'], 
-                    index=['English', 'Indonesian', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'].index(st.session_state.get('corpus_language', 'English')) if st.session_state.get('corpus_language', 'English') in ['English', 'Indonesian', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'] else 12,
-                    key="mono_lang"
+                    lang_options, 
+                    key="corpus_language"
                 )
             else:
                 st.info("🔗 **Parallel Mode Active**")
                 colA, colB = st.columns(2)
                 with colA:
-                    st.session_state['corpus_language'] = st.selectbox("Source Language", ['English', 'Indonesian', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'], index=0, key="p_src_lang")
+                    if 'corpus_language' not in st.session_state or st.session_state['corpus_language'] not in lang_options:
+                        st.session_state['corpus_language'] = 'English'
+                    st.radio(
+                        "Source Language", 
+                        lang_options, 
+                        key="corpus_language"
+                    )
                 with colB:
-                    st.session_state['target_language'] = st.selectbox("Target Language", ['English', 'Indonesian', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Javanese', 'Other'], index=1, key="p_tgt_lang")
+                    if 'target_language' not in st.session_state or st.session_state['target_language'] not in lang_options:
+                        st.session_state['target_language'] = 'Indonesian'
+                    st.radio(
+                        "Target Language", 
+                        lang_options, 
+                        key="target_language"
+                    )
 
             # Step 2: Show appropriate interface based on mode
             if st.session_state['corpus_selection_mode'] == "File Upload":
@@ -207,35 +242,44 @@ def render():
                 else:
                     if not is_parallel:
                         st.caption("📚 Select from available built-in corpora:")
-                        selected_builtin = st.multiselect("Choose corpora:", options=available_corpora, key="mono_builtin")
-                        st.session_state['staged_builtin'] = selected_builtin
+                        mode_b = st.radio("Selection Mode", ["Single Corpus (Radio)", "Multiple Corpora (Checkboxes)"], horizontal=True, key="builtin_select_mode")
+                        if mode_b == "Single Corpus (Radio)":
+                            chosen_corpus = st.radio("Choose corpus:", options=available_corpora, key="mono_builtin_radio")
+                            st.session_state['staged_builtin'] = [chosen_corpus] if chosen_corpus else []
+                        else:
+                            selected_builtin = []
+                            st.caption("Select corpora to load:")
+                            for corp in available_corpora:
+                                if st.checkbox(corp, value=True, key=f"builtin_cb_{corp}"):
+                                    selected_builtin.append(corp)
+                            st.session_state['staged_builtin'] = selected_builtin
                     else:
                         st.markdown("**1. Source Corpus**")
-                        src_selection = st.selectbox("Select Source Corpus", options=available_corpora, key="para_src_builtin")
+                        src_selection = st.radio("Select Source Corpus", options=available_corpora, key="para_src_builtin")
                         st.markdown("**2. Target Corpus**")
-                        tgt_selection = st.selectbox("Select Target Corpus", options=available_corpora, key="para_tgt_builtin")
+                        tgt_selection = st.radio("Select Target Corpus", options=available_corpora, key="para_tgt_builtin")
                         st.session_state['staged_parallel'] = (src_selection, tgt_selection) if src_selection and tgt_selection else None
 
             elif st.session_state['corpus_selection_mode'] == "Online Corpus":
                 st.caption("🌐 Build Corpus from Online Sources:")
-                online_mode = st.radio("Source Mode", ["YouTube", "Mastodon", "BlueSky", "Link Collection", "Keyword Search"], horizontal=True)
+                online_mode = st.radio("Source Mode", ["YouTube", "Mastodon", "BlueSky", "Link Collection", "Keyword Search"], horizontal=True, key="online_mode_radio")
                 st.session_state['online_builder_mode'] = online_mode
                 
                 if online_mode == "YouTube":
-                    st.session_state['online_url'] = st.text_input("YouTube Video URL", placeholder="https://www.youtube.com/watch?v=...")
-                    st.session_state['online_yt_mode'] = st.selectbox("What to extract?", ["both", "transcript", "comments"])
+                    st.session_state['online_url'] = st.text_input("YouTube Video URL", placeholder="https://www.youtube.com/watch?v=...", key="online_yt_url")
+                    st.session_state['online_yt_mode'] = st.radio("What to extract?", ["both", "transcript", "comments"], horizontal=True, key="online_yt_mode_sb")
                 elif online_mode == "Mastodon" or online_mode == "BlueSky":
-                    urls = st.text_area(f"{online_mode} URLs (one per line)", placeholder="https://...")
+                    urls = st.text_area(f"{online_mode} URLs (one per line)", placeholder="https://...", key="online_social_urls")
                     st.session_state['online_urls'] = [u.strip() for u in urls.split('\n') if u.strip()]
-                    st.session_state['online_social_mode'] = st.selectbox("Extract:", ["both", "post", "replies"])
+                    st.session_state['online_social_mode'] = st.radio("Extract:", ["both", "post", "replies"], horizontal=True, key="online_social_mode_sb")
                 elif online_mode == "Link Collection":
-                    urls = st.text_area("URLs to scrape (one per line)", placeholder="https://...")
+                    urls = st.text_area("URLs to scrape (one per line)", placeholder="https://...", key="online_link_coll_urls")
                     st.session_state['online_urls'] = [u.strip() for u in urls.split('\n') if u.strip()]
                 elif online_mode == "Keyword Search":
-                    kw = st.text_input("Keywords (comma separated)", placeholder="corpus linguistics, parsing")
+                    kw = st.text_input("Keywords (comma separated)", placeholder="corpus linguistics, parsing", key="online_kw_input")
                     st.session_state['online_keywords'] = [k.strip() for k in kw.split(',') if k.strip()]
                     
-                    st.session_state['online_max_links'] = st.selectbox("Max Links to Fetch", [25, 50, 75, 100], index=1)
+                    st.session_state['online_max_links'] = st.radio("Max Links to Fetch", [25, 50, 75, 100], index=1, horizontal=True, key="online_max_links_sb")
                     
                     if st.button("🔍 Find Links"):
                         if not st.session_state['online_keywords']:
@@ -257,11 +301,12 @@ def render():
                                         del st.session_state['keyword_found_links']
                                         
                     if st.session_state.get('keyword_found_links'):
-                        st.session_state['online_links_to_scrape'] = st.multiselect(
-                            "Select links to scrape (Easy-to-scrape domains at the top)", 
-                            options=st.session_state['keyword_found_links'], 
-                            default=st.session_state['keyword_found_links']
-                        )
+                        st.caption("Select links to scrape (Easy-to-scrape domains at top):")
+                        scraped_links = []
+                        for link in st.session_state['keyword_found_links']:
+                            if st.checkbox(link, value=True, key=f"online_link_cb_{link}"):
+                                scraped_links.append(link)
+                        st.session_state['online_links_to_scrape'] = scraped_links
                         
                         if st.session_state['online_links_to_scrape']:
                             est_time = max(1, len(st.session_state['online_links_to_scrape']) // 15)
@@ -716,9 +761,17 @@ def render():
     
     for key in meta_keys:
         values = get_metadata_values(key, active_corpora)
-        if values and len(values) <= 20:
-            sel = st.sidebar.multiselect(f"{key}", options=values, default=values)
-            selected_metadata[key] = sel
+        if values and len(values) <= 30:
+            with st.sidebar.expander(f"🏷️ {key}", expanded=True):
+                selected_vals = []
+                for val in values:
+                    val_str = str(val)
+                    cb_key = f"meta_cb_{key}_{val_str}"
+                    if cb_key not in st.session_state:
+                        st.session_state[cb_key] = True
+                    if st.checkbox(val_str, key=cb_key):
+                        selected_vals.append(val)
+                selected_metadata[key] = selected_vals
             
     st.sidebar.divider()
     st.sidebar.subheader("Filters")
@@ -742,81 +795,81 @@ def render():
     )
     
     if ai_provider == "Local (Ollama)":
-        # Initialize or fetch Ollama models
+        from utils.ai_helper import AIHelper, detect_ollama_disk_models, list_ollama_models
+        
+        # Initialize or fetch Ollama models from API and disk
         if 'ollama_models' not in st.session_state or not st.session_state['ollama_models']:
-            try:
-                from utils.ai_helper import AIHelper
-                temp_helper = AIHelper(provider="ollama")
-                res = temp_helper.test_connection()
-                if res['success']:
-                    st.session_state['ollama_models'] = res['models']
-                else:
-                    st.session_state['ollama_models'] = ["llama3.2", "llama3.1", "mistral", "phi"]
-            except:
-                st.session_state['ollama_models'] = ["llama3.2", "llama3.1", "mistral", "phi"]
+            st.session_state['ollama_models'] = list_ollama_models()
         
-        # Ensure default models are in the list if they are standard but not pulled yet
-        base_models = ["llama3.2", "llama3.1", "mistral", "phi"]
-        for bm in base_models:
-            if bm not in st.session_state['ollama_models']:
-                st.session_state['ollama_models'].append(bm)
+        disk_models = detect_ollama_disk_models()
+        all_detected = sorted(list(set(st.session_state['ollama_models'] + disk_models)))
         
-        # Model Dropdown
-        display_models = sorted(list(set(st.session_state['ollama_models']))) + ["custom"]
+        if disk_models:
+            st.sidebar.caption(f"💾 **Models Detected on Disk**: `{', '.join(disk_models)}`")
         
-        # Ensure currently selected model is in the list
-        curr_model = st.session_state.get('ollama_model', 'llama3.2')
-        if curr_model not in display_models:
-            display_models = [curr_model] + display_models
+        display_models = list(all_detected)
+        if "custom" not in display_models:
+            display_models.append("custom")
+        
+        if 'ollama_model' not in st.session_state or st.session_state['ollama_model'] not in display_models:
+            st.session_state['ollama_model'] = display_models[0] if display_models else 'llama3.2'
 
-        ollama_model = st.sidebar.selectbox(
+        ollama_model = st.sidebar.radio(
             "Ollama Model",
             display_models,
             key="ollama_model",
-            help="Select the Ollama model to use"
+            help="Select an Ollama model detected on your hard disk or running server"
         )
+
         if ollama_model == "custom":
             st.sidebar.text_input(
                 "Custom Model Name",
                 key="ollama_custom_model",
-                placeholder="model:tag"
+                placeholder="e.g. qwen2.5:7b, tinyllama:latest"
             )
         
         col_test, col_refresh = st.sidebar.columns(2)
         
         # Test connection button
-        if col_test.button("Test Connection", key="test_ollama", use_container_width=True):
-            try:
-                from utils.ai_helper import AIHelper
-                model = ollama_model if ollama_model != "custom" else st.session_state.get('ollama_custom_model', 'llama3.2')
-                helper = AIHelper(provider="ollama", model=model)
-                result = helper.test_connection()
-                if result['success']:
-                    st.session_state['ollama_models'] = result['models']
-                    models_str = ", ".join(result.get('models', []))
-                    st.sidebar.success(f"✅ {result['message']}\n\n**Models:** {models_str}")
-                else:
-                    st.sidebar.error(result['message'])
-            except Exception as e:
-                st.sidebar.error(f"Connection failed: {str(e)}")
+        if col_test.button("⚡ Test Connection", key="test_ollama", use_container_width=True):
+            with st.spinner("Testing Ollama connection..."):
+                try:
+                    model = ollama_model if ollama_model != "custom" else st.session_state.get('ollama_custom_model', 'llama3.2')
+                    helper = AIHelper(provider="ollama", model=model)
+                    result = helper.test_connection()
+                    if result['success']:
+                        st.session_state['ollama_models'] = result.get('models', [])
+                        models_str = ", ".join(result.get('models', []))
+                        st.sidebar.success(f"✅ {result['message']}\n\n**All Detected Models:** {models_str}")
+                    else:
+                        st.sidebar.error(f"❌ {result['message']}")
+                except Exception as e:
+                    st.sidebar.error(f"Connection test failed: {str(e)}")
         
-        if col_refresh.button("Refresh Models", key="refresh_ollama", use_container_width=True):
-            try:
-                from utils.ai_helper import AIHelper
-                temp_helper = AIHelper(provider="ollama")
-                res = temp_helper.test_connection()
-                if res['success']:
-                    st.session_state['ollama_models'] = res['models']
-                    st.sidebar.success(f"Fetched {len(res['models'])} models")
-                    st.rerun()
-                else:
-                    st.sidebar.error("Could not fetch models. Is Ollama running?")
-            except Exception as e:
-                st.sidebar.error(f"Fetch failed: {e}")
+        if col_refresh.button("🔍 Detect Models", key="refresh_ollama", use_container_width=True):
+            with st.spinner("Scanning hard disk & Ollama daemon..."):
+                found = list_ollama_models()
+                st.session_state['ollama_models'] = found
+                st.sidebar.success(f"Detected {len(found)} model(s) on hard disk / server!")
+                st.rerun()
         
-        st.sidebar.caption("💡 Make sure Ollama is running on localhost:11434")
+        st.sidebar.caption("💡 Make sure Ollama is installed and running on `localhost:11434`")
         
     elif ai_provider == "Google Gemini":
+        from utils.ai_helper import AIHelper, list_gemini_models
+        
+        # Load saved API key if available and not yet set
+        if not st.session_state.get('gemini_api_key'):
+            config_path = os.path.join(os.getcwd(), ".gemini_config.json")
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path, 'r') as f:
+                        config = json.load(f)
+                        if 'api_key' in config:
+                            st.session_state['gemini_api_key'] = config['api_key']
+                except:
+                    pass
+
         api_key = st.sidebar.text_input(
             "Gemini API Key",
             type="password",
@@ -824,24 +877,65 @@ def render():
             help="Get your API key from https://aistudio.google.com/apikey"
         )
         
-        gemini_model = st.sidebar.selectbox(
+        if 'gemini_models' not in st.session_state:
+            st.session_state['gemini_models'] = list_gemini_models(api_key if api_key else None)
+            
+        display_gemini = sorted(list(set(st.session_state['gemini_models'])))
+        if "custom" not in display_gemini:
+            display_gemini.append("custom")
+            
+        if 'gemini_model' not in st.session_state or st.session_state['gemini_model'] not in display_gemini:
+            st.session_state['gemini_model'] = 'gemini-2.0-flash-exp'
+            
+        gemini_model = st.sidebar.radio(
             "Gemini Model",
-            ["gemini-2.0-flash-exp", "gemini-1.5-pro", "gemini-1.5-flash"],
-            key="gemini_model"
+            display_gemini,
+            key="gemini_model",
+            help="Select official Google Gemini model"
         )
-        
+
+        if gemini_model == "custom":
+            st.sidebar.text_input(
+                "Custom Gemini Model Name",
+                key="gemini_custom_model",
+                placeholder="e.g. gemini-2.0-flash, gemini-3.0-preview"
+            )
+            
+        st.sidebar.caption(
+            "ℹ️ **Gemini Version Note**: Google Gemini official models are Gemini 2.0 (Flash/Pro) and Gemini 1.5. "
+            "If looking for 'Gemini v3', it may refer to Gemini 2.0 or custom preview model names. You can select 'custom' to enter custom model IDs."
+        )
+
+        col_test_g, col_fetch_g = st.sidebar.columns(2)
+
         # Test connection button
-        if api_key and st.sidebar.button("Test Gemini Connection", key="test_gemini"):
-            try:
-                from utils.ai_helper import AIHelper
-                helper = AIHelper(provider="gemini", api_key=api_key, model=gemini_model)
-                result = helper.test_connection()
-                if result['success']:
-                    st.sidebar.success(result['message'])
-                else:
-                    st.sidebar.error(result['message'])
-            except Exception as e:
-                st.sidebar.error(f"Connection failed: {str(e)}")
+        if col_test_g.button("⚡ Test Connection", key="test_gemini", use_container_width=True):
+            if not api_key:
+                st.sidebar.warning("Please enter your Gemini API key first.")
+            else:
+                with st.spinner("Testing Gemini connection..."):
+                    try:
+                        model = gemini_model if gemini_model != "custom" else st.session_state.get('gemini_custom_model', 'gemini-2.0-flash-exp')
+                        helper = AIHelper(provider="gemini", api_key=api_key, model=model)
+                        result = helper.test_connection()
+                        if result['success']:
+                            st.sidebar.success(f"✅ {result['message']}")
+                            if result.get('models'):
+                                st.session_state['gemini_models'] = result['models']
+                        else:
+                            st.sidebar.error(f"❌ {result['message']}")
+                    except Exception as e:
+                        st.sidebar.error(f"Connection test failed: {str(e)}")
+                        
+        if col_fetch_g.button("🔄 Fetch Models", key="fetch_gemini", use_container_width=True):
+            if not api_key:
+                st.sidebar.warning("Please enter API key first.")
+            else:
+                with st.spinner("Fetching accessible Gemini models..."):
+                    fetched = list_gemini_models(api_key)
+                    st.session_state['gemini_models'] = fetched
+                    st.sidebar.success(f"Fetched {len(fetched)} Gemini model(s)!")
+                    st.rerun()
         
         # Save API key option
         if api_key and st.sidebar.checkbox("Save API key locally", key="save_gemini_key"):
@@ -849,7 +943,7 @@ def render():
             try:
                 with open(config_path, 'w') as f:
                     json.dump({"api_key": api_key}, f)
-                st.sidebar.success("API key saved to .gemini_config.json")
+                st.sidebar.info("API key saved to .gemini_config.json")
             except Exception as e:
                 st.sidebar.error(f"Failed to save: {str(e)}")
         

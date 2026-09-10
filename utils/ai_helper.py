@@ -1,11 +1,74 @@
-"""
-AI Helper Module for Dictionary Lab
-Supports both local (Ollama) and cloud (Google Gemini) AI providers
-"""
-
+import os
 import requests
 import json
+import time
 from typing import List, Dict, Optional, Any
+
+def detect_ollama_disk_models() -> List[str]:
+    """Scans local hard disk for installed Ollama model manifests."""
+    models = set()
+    possible_paths = [
+        os.path.expanduser('~/.ollama/models/manifests'),
+        os.path.join(os.environ.get('USERPROFILE', ''), '.ollama', 'models', 'manifests'),
+        os.path.join(os.environ.get('LOCALAPPDATA', ''), 'ollama', 'models', 'manifests'),
+        r'C:\ProgramData\ollama\models\manifests',
+        '/usr/share/ollama/.ollama/models/manifests'
+    ]
+    for base in possible_paths:
+        if base and os.path.exists(base):
+            for root, dirs, files in os.walk(base):
+                for f in files:
+                    full_p = os.path.join(root, f)
+                    rel = os.path.relpath(full_p, base)
+                    parts = rel.replace('\\', '/').split('/')
+                    if len(parts) >= 2:
+                        model_name = parts[-2]
+                        tag = parts[-1]
+                        models.add(f"{model_name}:{tag}")
+    return sorted(list(models))
+
+def list_ollama_models() -> List[str]:
+    """Discovers all Ollama models available on local hard disk and active Ollama server."""
+    models = set(detect_ollama_disk_models())
+    try:
+        response = requests.get("http://localhost:11434/api/tags", timeout=3)
+        if response.status_code == 200:
+            api_models = response.json().get('models', [])
+            for m in api_models:
+                name = m.get('name')
+                if name:
+                    models.add(name)
+    except Exception:
+        pass
+    
+    if not models:
+        return ["llama3.2", "llama3.1", "mistral", "phi"]
+    return sorted(list(models))
+
+def list_gemini_models(api_key: Optional[str] = None) -> List[str]:
+    """Lists standard and dynamically accessible Gemini models."""
+    base_models = [
+        "gemini-2.0-flash-exp",
+        "gemini-2.0-flash",
+        "gemini-1.5-pro",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-8b",
+        "gemini-2.0-pro-exp-02-05"
+    ]
+    if api_key:
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            fetched = []
+            for m in genai.list_models():
+                if hasattr(m, 'supported_generation_methods') and 'generateContent' in m.supported_generation_methods:
+                    name = m.name.replace('models/', '')
+                    fetched.append(name)
+            if fetched:
+                base_models = sorted(list(set(base_models + fetched)))
+        except Exception:
+            pass
+    return base_models
 
 class AIHelper:
     """Unified AI interface for dictionary entry generation"""
@@ -34,34 +97,96 @@ class AIHelper:
             except ImportError:
                 raise ImportError("google-generativeai package not installed. Run: pip install google-generativeai")
     
+    @staticmethod
+    def detect_disk_models() -> List[str]:
+        return detect_ollama_disk_models()
+
+    @staticmethod
+    def get_ollama_models() -> List[str]:
+        return list_ollama_models()
+
+    @staticmethod
+    def get_gemini_models(api_key: Optional[str] = None) -> List[str]:
+        return list_gemini_models(api_key)
+
     def _get_default_model(self) -> str:
         """Get default model for the provider"""
         if self.provider == "ollama":
-            return "llama3.2"
+            detected = list_ollama_models()
+            return detected[0] if detected else "llama3.2"
         elif self.provider == "gemini":
             return "gemini-2.0-flash-exp"
         return "llama3.2"
     
     def test_connection(self) -> Dict[str, Any]:
-        """Test connection to AI provider"""
+        """Test connection to AI provider and verify generation capabilities."""
+        start_time = time.time()
         try:
             if self.provider == "ollama":
-                response = requests.get("http://localhost:11434/api/tags", timeout=5)
-                if response.status_code == 200:
-                    models = response.json().get('models', [])
-                    model_names = [m.get('name') for m in models]
-                    return {"success": True, "message": f"Connected to Ollama. Available models: {len(model_names)}", "models": model_names}
-                else:
-                    return {"success": False, "message": f"Ollama not responding (Status {response.status_code})"}
+                all_models = list_ollama_models()
+                disk_models = detect_ollama_disk_models()
+                
+                try:
+                    response = requests.get("http://localhost:11434/api/tags", timeout=5)
+                    server_up = (response.status_code == 200)
+                except Exception:
+                    server_up = False
+                
+                if not server_up:
+                    msg = "Ollama server is not running on http://localhost:11434."
+                    if disk_models:
+                        msg += f" Detected {len(disk_models)} model(s) on hard disk ({', '.join(disk_models[:5])}). Please start the Ollama application."
+                    return {
+                        "success": False,
+                        "message": msg,
+                        "models": all_models,
+                        "disk_models": disk_models,
+                        "server_up": False
+                    }
+                
+                # Test prompt call to verify active model
+                test_prompt = "Reply with 'OK'"
+                try:
+                    res_text = self._call_ollama(test_prompt, max_tokens=15)
+                    latency = round(time.time() - start_time, 2)
+                    return {
+                        "success": True,
+                        "message": f"Successfully connected to Ollama! Model '{self.model}' responded in {latency}s: \"{res_text[:50]}\"",
+                        "models": all_models,
+                        "disk_models": disk_models,
+                        "active_model": self.model,
+                        "latency_s": latency,
+                        "server_up": True
+                    }
+                except Exception as e:
+                    return {
+                        "success": False,
+                        "message": f"Ollama server is active, but model '{self.model}' failed: {str(e)}",
+                        "models": all_models,
+                        "disk_models": disk_models,
+                        "server_up": True
+                    }
             
             elif self.provider == "gemini":
-                # Test with a simple prompt
+                if not self.api_key:
+                    return {"success": False, "message": "API key is missing for Gemini."}
+                
                 model = self.genai.GenerativeModel(self.model)
-                response = model.generate_content("Test")
-                return {"success": True, "message": f"Connected to Gemini ({self.model})"}
+                response = model.generate_content("Ping")
+                latency = round(time.time() - start_time, 2)
+                
+                available_models = list_gemini_models(self.api_key)
+                return {
+                    "success": True,
+                    "message": f"Successfully connected to Gemini API! Model '{self.model}' responded in {latency}s.",
+                    "models": available_models,
+                    "active_model": self.model,
+                    "latency_s": latency
+                }
                 
         except Exception as e:
-            return {"success": False, "message": f"Connection failed: {str(e)}"}
+            return {"success": False, "message": f"Connection test failed: {str(e)}"}
+
     
     def _call_ai(self, prompt: str, max_tokens: int = 500) -> str:
         """Call the configured AI provider"""
@@ -465,6 +590,9 @@ def get_ai_helper(session_state: Dict) -> Optional[AIHelper]:
         if not api_key:
             return None
         model = session_state.get('gemini_model', 'gemini-2.0-flash-exp')
+        if model == 'custom':
+            model = session_state.get('gemini_custom_model', 'gemini-2.0-flash-exp')
         return AIHelper(provider="gemini", api_key=api_key, model=model)
     
     return None
+
