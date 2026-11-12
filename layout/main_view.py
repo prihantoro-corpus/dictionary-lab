@@ -447,23 +447,19 @@ def render_word_tracker_tab(where_clause="1=1", params=()):
     st.title("⏱️ CORTEX Word Tracker")
     st.info("Tracks word usage volatility across time using corpus metadata and document attributes.")
     
-    # 1. Feature of Time Selection via Radio Button
+    # 1. Feature of Time — controlled by sidebar radio (key="selected_time_attribute")
     available_attrs = word_tracker.get_available_time_attributes(where_clause, params)
     if not available_attrs:
         available_attrs = ['corpus', 'doc_id', 'file_id']
-        
+
+    # Ensure session state has a valid value
     if 'selected_time_attribute' not in st.session_state or st.session_state['selected_time_attribute'] not in available_attrs:
         st.session_state['selected_time_attribute'] = available_attrs[0]
-        
-    st.subheader("1. Select Feature of Time")
-    st.caption("Choose metadata key or structural attribute to group time periods:")
-    
-    selected_time_attr = st.radio(
-        "Feature of Time (Attribute)",
-        options=available_attrs,
-        horizontal=True,
-        key="selected_time_attribute"
-    )
+
+    selected_time_attr = st.session_state['selected_time_attribute']
+
+    st.subheader("1. Feature of Time")
+    st.caption(f"Currently grouping by: **{selected_time_attr}** — change this in the sidebar under ⏱️ Feature of Time.")
     
     st.divider()
     
