@@ -46,6 +46,22 @@ def get_disk_corpora():
             disk_files[name] = f
     return disk_files
 
+REPO_URL = "https://github.com/prihantoro-corpus/dictionary-lab"
+
+def render_licence():
+    """Renders the About / Licence section at the bottom of the sidebar."""
+    st.sidebar.divider()
+    with st.sidebar.expander("📜 About / Licence", expanded=False):
+        st.markdown(
+            f"""
+| Component | Licence |
+|---|---|
+| Source code | [GNU AGPL-3.0-or-later]({REPO_URL}/blob/main/LICENSE) |
+| Documentation, manual & original data | [CC BY-NC 4.0]({REPO_URL}/blob/main/LICENSE-DOCS) |
+| Third-party corpora/tools (BAWE, ICNALE, BPPT, TreeTagger, …) | Their original licences |
+"""
+        )
+
 def clean_name(n):
     """Helper to map common filenames to cleaner names."""
     if "EN-BPPT" in n: return "EN-BPPT"
@@ -823,6 +839,7 @@ def render():
     # If nothing loaded, stop here
     if not active_corpora:
         st.sidebar.warning("⚠️ No corpora loaded. Use **Corpus Selection** above to load corpora.")
+        render_licence()
         return {
             'where_clause': "1=0",
             'params': [],
@@ -1095,7 +1112,7 @@ def render():
                 except:
                     pass
 
-
+    render_licence()
     
     where_parts = []
     params = []

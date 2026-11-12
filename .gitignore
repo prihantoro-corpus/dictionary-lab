@@ -22,7 +22,6 @@ test_root_tag.txt
 
 *.duckdb
 !BAWE.duckdb
-!corpora/*.duckdb
 corpora/swahili_*
 corpora/afya_*
 corpora/dictionary.duckdb

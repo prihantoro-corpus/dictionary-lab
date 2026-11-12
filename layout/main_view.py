@@ -1,5 +1,6 @@
 
 import streamlit as st
+import re
 import pandas as pd
 import eng_to_ipa as ipa
 from utils import indo_g2p
@@ -211,12 +212,30 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
     else:
         render_search_tab(where_clause, params, stop_words, collocate_filter, skip_punct)
 
+def _natural_sort_key(s):
+    """Sorts strings naturally, e.g. 'Sublist 2' before 'Sublist 10', with 'Not in Wordlist' last."""
+    if s == "Not in Wordlist":
+        return [float('inf')]
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', str(s))]
+
+
 def render_profiler_tab(where_clause, params):
     st.title("📊 Vocabulary Profiler")
-    st.info("Analyzes the coverage of your current corpus against known and uploaded wordlists.")
+    st.info("Analyzes corpus text coverage by word counts and percentages against selected wordlists.")
+    st.caption(
+        "Coverage is calculated based on running words in the text. "
+        "Inflected words (e.g. 'needs', 'needed') are matched using their base form so they are properly recognized. "
+        "Punctuation and numbers are excluded."
+    )
+    disabled = sorted(k for k, v in st.session_state.get('active_wordlists', {}).items() if not v)
+    if disabled:
+        st.caption(f"Skipped (disabled in sidebar): {', '.join(disabled)}")
     
     with st.spinner("Calculating profile..."):
-        all_profiles = profiler.get_vocabulary_profile(where_clause, params)
+        all_profiles = profiler.get_vocabulary_profile(
+            where_clause, params,
+            active_lists=st.session_state.get('active_wordlists', {})
+        )
         
     if not all_profiles or not all_profiles['Aggregate']:
         st.warning("No data found to profile. Please ensure you have loaded a corpus and selected it in the sidebar.")
@@ -231,23 +250,39 @@ def render_profiler_tab(where_clause, params):
             agg_rows = []
             agg_br_rows = []
             for list_name, ldata in data['Aggregate'].items():
+                tot = ldata.get('total_words', 0)
+                cov = ldata.get('covered_words', 0)
+                ncov = ldata.get('not_covered_words', 0)
+                pct = ldata.get('coverage_pct', 0)
                 agg_rows.append({
                     "Wordlist": list_name,
-                    "Total Corpus Lemmas": ldata['total_corpus_unique'],
-                    "Covered": ldata['covered_count'],
-                    "Coverage %": f"{ldata['coverage_pct']:.2f}%"
+                    "Total Words": tot,
+                    "Covered Words": cov,
+                    "Not Covered Words": ncov,
+                    "Coverage %": f"{pct:.2f}%"
                 })
-                for cat, count in ldata['breakdown'].items():
+
+                br = ldata.get('breakdown', {})
+                for cat in sorted(br.keys(), key=_natural_sort_key):
+                    cnt = br[cat]
                     agg_br_rows.append({
                         "Wordlist": list_name,
                         "Category": cat,
-                        "Count": count,
-                        "Corpus %": f"{(count / ldata['total_corpus_unique'] * 100):.2f}%" if ldata['total_corpus_unique'] > 0 else "0%"
+                        "Word Count": cnt,
+                        "% of Text": f"{(cnt / tot * 100):.2f}%" if tot > 0 else "0%"
                     })
-            
+                if ncov > 0:
+                    agg_br_rows.append({
+                        "Wordlist": list_name,
+                        "Category": "Not in Wordlist",
+                        "Word Count": ncov,
+                        "% of Text": f"{(ncov / tot * 100):.2f}%" if tot > 0 else "0%"
+                    })
+
             pd.DataFrame(agg_rows).to_excel(writer, sheet_name="Aggregate Summary", index=False)
-            pd.DataFrame(agg_br_rows).to_excel(writer, sheet_name="Aggregate Breakdown", index=False)
-            
+            if agg_br_rows:
+                pd.DataFrame(agg_br_rows).to_excel(writer, sheet_name="Aggregate Breakdown", index=False)
+
             # Sheet 2: By Corpus
             corp_rows = []
             for cname, cdata in data['By Corpus'].items():
@@ -255,12 +290,14 @@ def render_profiler_tab(where_clause, params):
                     corp_rows.append({
                         "Corpus": cname,
                         "Wordlist": list_name,
-                        "Total Lemmas": ldata['total_corpus_unique'],
-                        "Covered": ldata['covered_count'],
-                        "Coverage %": f"{ldata['coverage_pct']:.2f}%"
+                        "Total Words": ldata.get('total_words', 0),
+                        "Covered Words": ldata.get('covered_words', 0),
+                        "Not Covered Words": ldata.get('not_covered_words', 0),
+                        "Coverage %": f"{ldata.get('coverage_pct', 0):.2f}%"
                     })
-            pd.DataFrame(corp_rows).to_excel(writer, sheet_name="By Corpus", index=False)
-            
+            if corp_rows:
+                pd.DataFrame(corp_rows).to_excel(writer, sheet_name="By Corpus", index=False)
+
             # Sheet 3: By File
             file_rows = []
             for fname, fdata in data['By File'].items():
@@ -268,12 +305,14 @@ def render_profiler_tab(where_clause, params):
                     file_rows.append({
                         "File": fname,
                         "Wordlist": list_name,
-                        "Total Lemmas": ldata['total_corpus_unique'],
-                        "Covered": ldata['covered_count'],
-                        "Coverage %": f"{ldata['coverage_pct']:.2f}%"
+                        "Total Words": ldata.get('total_words', 0),
+                        "Covered Words": ldata.get('covered_words', 0),
+                        "Not Covered Words": ldata.get('not_covered_words', 0),
+                        "Coverage %": f"{ldata.get('coverage_pct', 0):.2f}%"
                     })
-            pd.DataFrame(file_rows).to_excel(writer, sheet_name="By File", index=False)
-            
+            if file_rows:
+                pd.DataFrame(file_rows).to_excel(writer, sheet_name="By File", index=False)
+
         return output.getvalue()
 
     excel_data = generate_excel(all_profiles)
@@ -290,94 +329,119 @@ def render_profiler_tab(where_clause, params):
     available_lists = sorted(list(profiles.keys()))
     
     st.divider()
-    selected_lists = st.multiselect(
+    selected_list = st.radio(
         "🎯 Select wordlists to display detailed results:",
         options=available_lists,
-        default=[],
-        help="Choose one or more wordlists to see their coverage tables and charts below. The Excel download above always contains all data."
+        index=0,
+        horizontal=True,
+        help="Choose a wordlist to see its coverage tables and charts below. The Excel download above always contains all data.",
+        key="profiler_selected_wordlist"
     )
 
-    if not selected_lists:
+    if not selected_list:
         st.info("Pick a wordlist above to view its detailed profile.")
         return
 
-    # UI Rendering (Selected Only)
-    for list_name in selected_lists:
-        data = profiles[list_name]
-        st.divider()
-        st.subheader(f"📋 Wordlist: {list_name}")
+    data = profiles[selected_list]
+    st.divider()
+    st.subheader(f"📋 Wordlist: {selected_list}")
+
+    tot = data.get('total_words', 0)
+    cov = data.get('covered_words', 0)
+    ncov = data.get('not_covered_words', 0)
+    pct = data.get('coverage_pct', 0)
+    breakdown = data.get('breakdown', {})
+    has_categories = len(breakdown) > 0 and not (len(breakdown) == 1 and ("Generic" in breakdown or "" in breakdown))
+
+    # Metric Cards at top
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Corpus Size", f"{tot:,} words")
+    m2.metric("Coverage", f"{cov:,} words", f"{pct:.1f}%")
+    m3.metric("Not in Wordlist", f"{ncov:,} words", f"{(ncov / tot * 100 if tot else 0):.1f}%")
+
+    st.write("")
+
+    # If has categories: 2-column layout [Category Table | Visual Charts]
+    if has_categories:
+        c1, c2 = st.columns([1.5, 1.2])
+
+        cat_rows = []
+        for cat in sorted(breakdown.keys(), key=_natural_sort_key):
+            cnt = breakdown[cat]
+            cat_pct = (cnt / tot * 100) if tot else 0
+            cat_rows.append({"Category": cat, "Words": f"{cnt:,}", "% of Text": f"{cat_pct:.2f}%", "_raw": cnt})
         
-        # Determine layout
-        breakdown = data['breakdown']
-        has_categories = len(breakdown) > 0 and not (len(breakdown) == 1 and ("Generic" in breakdown or "" in breakdown))
-        
-        if has_categories:
-            # 4 columns: [Table 1, Visual 1, Table 2, Visual 2]
-            c1, c2, c3, c4 = st.columns([1.5, 0.7, 1.5, 0.7])
-            
-            with c1:
-                st.markdown("#### Table 1: Summary")
-                summary_df = pd.DataFrame([
-                    {"Metric": "Unique Lemmas", "Value": data['total_corpus_unique']},
-                    {"Metric": "Covered", "Value": data['covered_count']},
-                    {"Metric": "Not Covered", "Value": data['not_covered_count']},
-                    {"Metric": "Coverage %", "Value": f"{data['coverage_pct']:.1f}%"}
-                ])
-                st.table(summary_df)
-                
-            with c2:
-                st.markdown("#### Visual 1")
-                fig1, ax1 = plt.subplots(figsize=(2, 2))
-                ax1.pie([data['covered_count'], data['not_covered_count']], 
-                       labels=['C', 'NC'], autopct='%1.0f%%', startangle=90, 
-                       colors=['#4CAF50', '#FF5252'], shadow=True, explode=(0.1, 0),
-                       textprops={'fontsize': 8})
-                ax1.axis('equal')
-                st.pyplot(fig1, use_container_width=False)
-                
-            with c3:
-                st.markdown("#### Table 2: Category (Top 50)")
-                sorted_cats = sorted(breakdown.keys())
-                breakdown_data = [{"Cat": c, "Count": breakdown[c], "%": f"{(breakdown[c]/data['total_corpus_unique']*100):.1f}%"} for c in sorted_cats]
-                breakdown_df = pd.DataFrame(breakdown_data)
-                st.table(breakdown_df.head(50))
-                if len(breakdown_df) > 50:
-                    st.caption(f"Showing 50 of {len(breakdown_df)}")
-                    
-            with c4:
-                st.markdown("#### Visual 2")
-                from mpl_toolkits.mplot3d import Axes3D
-                import numpy as np
-                plot_df = breakdown_df.head(15)
-                fig2 = plt.figure(figsize=(2, 2))
-                ax2 = fig2.add_subplot(111, projection='3d')
-                x_pos = np.arange(len(plot_df))
-                ax2.bar3d(x_pos, np.zeros(len(plot_df)), np.zeros(len(plot_df)), 0.5, 0.5, plot_df['Count'], color='#2196F3', alpha=0.8)
-                ax2.set_xticks(x_pos)
-                ax2.set_xticklabels(plot_df['Cat'], rotation=45, ha='right', fontsize=6)
-                ax2.set_yticks([])
-                ax2.set_zlabel('Count', fontsize=6)
-                st.pyplot(fig2, use_container_width=False)
-                
-        else:
-            # 2 columns only
-            c1, c2 = st.columns([3, 1])
-            with c1:
-                st.markdown("#### Table 1: Coverage Summary")
-                summary_df = pd.DataFrame([
-                    {"Metric": "Corpus Unique Lemmas", "Value": data['total_corpus_unique']},
-                    {"Metric": "Lemmas in Wordlist", "Value": data['covered_count']},
-                    {"Metric": "Lemmas NOT in Wordlist", "Value": data['not_covered_count']},
-                    {"Metric": "Coverage (%)", "Value": f"{data['coverage_pct']:.2f}%"}
-                ])
-                st.table(summary_df)
-            with c2:
-                st.markdown("#### Visual 1: Pie Chart")
-                fig1, ax1 = plt.subplots(figsize=(2.5, 2.5))
-                ax1.pie([data['covered_count'], data['not_covered_count']], labels=['Covered', 'Not Covered'], 
-                       autopct='%1.1f%%', startangle=90, colors=['#4CAF50', '#FF5252'], shadow=True, explode=(0.05, 0))
-                ax1.axis('equal')
-    
+        ncov_pct = (ncov / tot * 100) if tot else 0
+        cat_rows.append({"Category": "Not in Wordlist", "Words": f"{ncov:,}", "% of Text": f"{ncov_pct:.2f}%", "_raw": ncov})
+        cat_df = pd.DataFrame(cat_rows)
+        cat_df.index = range(1, len(cat_df) + 1)
+
+        with c1:
+            st.markdown("#### 📋 Word Breakdown by Category")
+            st.table(cat_df.drop(columns=['_raw']))
+
+        with c2:
+            st.markdown("#### 📊 Coverage & Distribution")
+            # 1. Pie chart of covered vs not covered
+            fig1, ax1 = plt.subplots(figsize=(2.8, 2.0))
+            ax1.pie(
+                [cov, ncov],
+                labels=['Covered', 'Not in list'],
+                autopct='%1.1f%%',
+                startangle=90,
+                colors=['#4CAF50', '#FF5252'],
+                explode=(0.05, 0),
+                textprops={'fontsize': 8}
+            )
+            ax1.axis('equal')
+            plt.tight_layout()
+            st.pyplot(fig1, use_container_width=True)
+
+            # 2. Bar chart of top categories
+            top_cats = [r for r in cat_rows if r['Category'] != 'Not in Wordlist'][:10]
+            if top_cats:
+                fig2, ax2 = plt.subplots(figsize=(2.8, 1.8))
+                ax2.bar([r['Category'] for r in top_cats], [r['_raw'] for r in top_cats], color='#2196F3', width=0.6)
+                ax2.set_ylabel('Words', fontsize=7)
+                ax2.tick_params(axis='x', rotation=45, labelsize=7)
+                ax2.tick_params(axis='y', labelsize=7)
+                ax2.spines['top'].set_visible(False)
+                ax2.spines['right'].set_visible(False)
+                plt.tight_layout()
+                st.pyplot(fig2, use_container_width=True)
+
+    else:
+        # Simple wordlist without subcategories (e.g. GSL or a single custom list)
+        c1, c2 = st.columns([1.5, 1.2])
+
+        summary_df = pd.DataFrame([
+            {"Metric": "Corpus Size", "Words": f"{tot:,}", "% of Text": "100.0%"},
+            {"Metric": "Covered in Wordlist", "Words": f"{cov:,}", "% of Text": f"{pct:.2f}%"},
+            {"Metric": "Not in Wordlist", "Words": f"{ncov:,}", "% of Text": f"{(ncov / tot * 100 if tot else 0):.2f}%"}
+        ])
+        summary_df.index = range(1, len(summary_df) + 1)
+
+        with c1:
+            st.markdown("#### 📋 Coverage Summary")
+            st.table(summary_df)
+
+        with c2:
+            st.markdown("#### 📊 Coverage Visual")
+            fig1, ax1 = plt.subplots(figsize=(2.8, 2.2))
+            ax1.pie(
+                [cov, ncov],
+                labels=['Covered', 'Not in list'],
+                autopct='%1.1f%%',
+                startangle=90,
+                colors=['#4CAF50', '#FF5252'],
+                explode=(0.05, 0),
+                textprops={'fontsize': 8}
+            )
+            ax1.axis('equal')
+            plt.tight_layout()
+            st.pyplot(fig1, use_container_width=True)
+
+
 
 def render_word_tracker_tab(where_clause="1=1", params=()):
     st.title("⏱️ CORTEX Word Tracker")

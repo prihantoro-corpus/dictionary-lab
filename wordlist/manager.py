@@ -27,6 +27,51 @@ except ImportError:
 WORDLIST_DIR = "wordlist"
 _cache = {}
 
+# Clean, pre-converted versions of GSL / AWL. When present they take precedence
+# over the PDF / DOCX sources, whose text extraction picks up non-headword noise.
+GSL_CSV = "gsl_converted.csv"
+AWL_FAMILIES_CSV = "awl_families.csv"   # Coxhead AWL: Headword,Sublist,Member
+AWL_CSV = "awl_converted.csv"           # Headwords only (fallback)
+
+# AWL family member -> headword (filled by load_wordlists)
+AWL_FAMILIES = {}
+
+def _load_clean_lists(loaded):
+    """Loads GSL / AWL from the clean CSV files, if available."""
+    gsl_path = os.path.join(WORDLIST_DIR, GSL_CSV)
+    if os.path.isfile(gsl_path):
+        entries = {}
+        with open(gsl_path, 'r', encoding='utf-8') as f:
+            for row in csv.DictReader(f):
+                word = (row.get('Headword') or '').strip().lower()
+                if word:
+                    entries[word] = "Yes"
+        loaded['GSL'] = entries
+
+    fam_path = os.path.join(WORDLIST_DIR, AWL_FAMILIES_CSV)
+    awl_path = os.path.join(WORDLIST_DIR, AWL_CSV)
+    if os.path.isfile(fam_path):
+        entries = {}
+        AWL_FAMILIES.clear()
+        with open(fam_path, 'r', encoding='utf-8') as f:
+            for row in csv.DictReader(f):
+                head = (row.get('Headword') or '').strip().lower()
+                member = (row.get('Member') or '').strip().lower()
+                sublist = (row.get('Sublist') or '').strip()
+                if head and member:
+                    entries[member] = f"Sublist {sublist}"
+                    AWL_FAMILIES[member] = head
+        loaded['AWL'] = entries
+    elif os.path.isfile(awl_path):
+        entries = {}
+        with open(awl_path, 'r', encoding='utf-8') as f:
+            for row in csv.DictReader(f):
+                word = (row.get('Headword') or '').strip().lower()
+                sublist = (row.get('Sublist') or '').strip()
+                if word:
+                    entries[word] = f"Sublist {sublist}"
+        loaded['AWL'] = entries
+
 def load_wordlists():
     """
     Loads known wordlists with specific parsing logic.
@@ -40,6 +85,7 @@ def load_wordlists():
         return {}
 
     loaded = {}
+    _load_clean_lists(loaded)
     
     for filename in os.listdir(WORDLIST_DIR):
         filepath = os.path.join(WORDLIST_DIR, filename)
@@ -63,7 +109,7 @@ def load_wordlists():
                 loaded['NGSL'] = entries
 
             # 2. GSL (PDF)
-            elif "general-service-list" in fname_lower and fname_lower.endswith(".pdf"):
+            elif "general-service-list" in fname_lower and fname_lower.endswith(".pdf") and 'GSL' not in loaded:
                 if HAS_PDF:
                     entries = {}
                     reader = PdfReader(filepath)
@@ -80,7 +126,7 @@ def load_wordlists():
                     loaded['GSL'] = entries
 
             # 3. AWL (DOCX)
-            elif "academic-word-list" in fname_lower and fname_lower.endswith(".docx"):
+            elif "academic-word-list" in fname_lower and fname_lower.endswith(".docx") and 'AWL' not in loaded:
                 if HAS_DOCX:
                     entries = {}
                     doc = Document(filepath)
