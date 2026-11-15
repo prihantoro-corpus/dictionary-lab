@@ -482,7 +482,10 @@ def render_word_tracker_tab(where_clause="1=1", params=()):
         
     # 3. Calculate Volatility
     with st.spinner(f"Calculating volatility for '{token}' across '{selected_time_attr}'..."):
-        vol_result = word_tracker.calculate_word_volatility(token, selected_time_attr, where_clause, params)
+        try:
+            vol_result = word_tracker.calculate_word_volatility(token, selected_time_attr, where_clause, params)
+        except Exception:
+            vol_result = {'success': False, 'message': 'Volatility calculation skipped due to memory constraints.'}
         
     if not vol_result.get('success'):
         st.error(vol_result.get('message', 'No volatility data available.'))
@@ -805,7 +808,10 @@ def render_multiword_view(query, where_clause, params, stop_words, collocate_fil
         avail_attrs = word_tracker.get_available_time_attributes(where_clause, params)
         selected_time_attr = avail_attrs[0] if avail_attrs else 'corpus'
         
-    vol_res = word_tracker.calculate_word_volatility(query, selected_time_attr, where_clause, params)
+    try:
+        vol_res = word_tracker.calculate_word_volatility(query, selected_time_attr, where_clause, params)
+    except Exception:
+        vol_res = {'success': False, 'message': 'Volatility calculation skipped due to memory constraints.'}
     vol_band_html = ""
     if vol_res.get('success'):
         v_label = vol_res['volatility_label']
@@ -1239,7 +1245,10 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                     avail_attrs = word_tracker.get_available_time_attributes(where_clause, params)
                     selected_time_attr = avail_attrs[0] if avail_attrs else 'corpus'
                     
-                vol_res = word_tracker.calculate_word_volatility(query, selected_time_attr, where_clause, params, pos_tag=tag)
+                try:
+                    vol_res = word_tracker.calculate_word_volatility(query, selected_time_attr, where_clause, params, pos_tag=tag)
+                except Exception:
+                    vol_res = {'success': False, 'message': 'Volatility calculation skipped due to memory constraints.'}
                 vol_band_html = ""
                 if vol_res.get('success'):
                     v_label = vol_res['volatility_label']
@@ -1367,7 +1376,11 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                         horizontal=True,
                         key=f"vol_attr_radio_{query}_{tag}"
                     )
-                    vol_res = word_tracker.calculate_word_volatility(query, sel_time_attr, where_clause, params, pos_tag=tag)
+                    try:
+                        vol_res = word_tracker.calculate_word_volatility(query, sel_time_attr, where_clause, params, pos_tag=tag)
+                    except Exception:
+                        vol_res = {'success': False, 'message': 'Volatility calculation skipped due to memory constraints.'}
+                        st.warning('⚠️ Volatility calculation skipped due to memory constraints on the server.')
                     if vol_res.get('success'):
                         v_label = vol_res['volatility_label']
                         v_score = vol_res['volatility_score']

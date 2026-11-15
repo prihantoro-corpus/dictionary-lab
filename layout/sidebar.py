@@ -12,6 +12,13 @@ from pipeline.overrides_io import load_overrides, save_overrides
 
 CORPORA_DIR = os.path.join(os.getcwd(), "corpora")
 
+# Maximum number of corpora that can be loaded simultaneously on Streamlit Cloud
+MAX_CORPORA_CLOUD = 3
+
+def _is_streamlit_cloud():
+    """Detect if running on Streamlit Community Cloud."""
+    return os.environ.get('STREAMLIT_SHARING_MODE') is not None or os.path.exists('/mount/src')
+
 @st.cache_data
 def get_corpora():
     """Returns list of corpora names already indexed as .duckdb files."""
@@ -265,9 +272,14 @@ def render():
                         else:
                             selected_builtin = []
                             st.caption("Select corpora to load:")
+                            if _is_streamlit_cloud():
+                                st.info(f"\u2601\ufe0f Cloud mode: max **{MAX_CORPORA_CLOUD}** corpora at a time to stay within memory limits.")
                             for corp in available_corpora:
                                 if st.checkbox(corp, value=True, key=f"builtin_cb_{corp}"):
                                     selected_builtin.append(corp)
+                            if _is_streamlit_cloud() and len(selected_builtin) > MAX_CORPORA_CLOUD:
+                                st.warning(f"\u26a0\ufe0f You selected {len(selected_builtin)} corpora but the cloud limit is {MAX_CORPORA_CLOUD}. Only the first {MAX_CORPORA_CLOUD} will be loaded.")
+                                selected_builtin = selected_builtin[:MAX_CORPORA_CLOUD]
                             st.session_state['staged_builtin'] = selected_builtin
                     else:
                         st.markdown("**1. Source Corpus**")
@@ -660,7 +672,15 @@ def render():
             # Activate loaded corpora immediately
             if loaded_names:
                 current_loaded = st.session_state.get('loaded_corpora', [])
-                st.session_state['loaded_corpora'] = list(set(current_loaded + loaded_names))
+                new_loaded = list(set(current_loaded + loaded_names))
+                
+                # Enforce max corpora limit on Streamlit Cloud
+                if _is_streamlit_cloud() and len(new_loaded) > MAX_CORPORA_CLOUD:
+                    st.warning(f"\u26a0\ufe0f Cloud memory limit: only {MAX_CORPORA_CLOUD} corpora can be active. Keeping the {MAX_CORPORA_CLOUD} most recently loaded.")
+                    # Prioritize newly loaded corpora, then fill with existing
+                    new_loaded = (loaded_names + [c for c in current_loaded if c not in loaded_names])[:MAX_CORPORA_CLOUD]
+                
+                st.session_state['loaded_corpora'] = new_loaded
                 st.session_state['last_selection'] = st.session_state['loaded_corpora']
                 
                 # Re-attach databases to the active memory connection

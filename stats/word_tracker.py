@@ -11,8 +11,7 @@ def get_available_time_attributes(where_clause="1=1", params=()) -> List[str]:
     try:
         query_meta = f"""
             SELECT DISTINCT unnest(json_keys(metadata)) as k 
-            FROM tokens 
-            WHERE metadata IS NOT NULL AND {where_clause}
+            FROM (SELECT metadata FROM tokens WHERE metadata IS NOT NULL AND {where_clause} LIMIT 1000)
         """
         res_meta = safe_execute(conn, query_meta, params).fetchall()
         meta_keys = [r[0] for r in res_meta if r[0]]
@@ -53,43 +52,39 @@ def calculate_word_volatility(token: str, time_attr: str, where_clause="1=1", pa
         else:
             time_expr = f"json_extract_string(metadata, '$.{time_attr}')"
             
-        # 1. Total tokens per time period
-        query_totals = f"""
-            SELECT {time_expr} as time_val, COUNT(*) as total_tokens
-            FROM tokens
-            WHERE {time_expr} IS NOT NULL AND {where_clause}
-            GROUP BY time_val
-            ORDER BY time_val
-        """
-        res_totals = safe_execute(conn, query_totals, params).fetchall()
-        totals_map = {str(r[0]): r[1] for r in res_totals if r[0] is not None}
+        # 1 & 2. Combined: Total tokens and word frequency per time period (single scan)
+        if pos_tag:
+            query_combined = f"""
+                SELECT {time_expr} as time_val, 
+                       COUNT(*) as total_tokens,
+                       COUNT(*) FILTER (WHERE token ILIKE ? AND tag = ?) as word_count
+                FROM tokens
+                WHERE {time_expr} IS NOT NULL AND {where_clause}
+                GROUP BY time_val
+                ORDER BY time_val
+            """
+            combined_params = (token, pos_tag, *params)
+        else:
+            query_combined = f"""
+                SELECT {time_expr} as time_val, 
+                       COUNT(*) as total_tokens,
+                       COUNT(*) FILTER (WHERE token ILIKE ?) as word_count
+                FROM tokens
+                WHERE {time_expr} IS NOT NULL AND {where_clause}
+                GROUP BY time_val
+                ORDER BY time_val
+            """
+            combined_params = (token, *params)
+            
+        res_combined = safe_execute(conn, query_combined, combined_params).fetchall()
+        totals_map = {str(r[0]): r[1] for r in res_combined if r[0] is not None}
+        token_map = {str(r[0]): r[2] for r in res_combined if r[0] is not None}
         
         if not totals_map:
             return {
                 'success': False,
                 'message': f"No data found for time attribute '{time_attr}'."
             }
-            
-        # 2. Token frequency per time period
-        if pos_tag:
-            query_token = f"""
-                SELECT {time_expr} as time_val, COUNT(*) as word_count
-                FROM tokens
-                WHERE token ILIKE ? AND tag = ? AND {time_expr} IS NOT NULL AND {where_clause}
-                GROUP BY time_val
-            """
-            token_params = (token, pos_tag, *params)
-        else:
-            query_token = f"""
-                SELECT {time_expr} as time_val, COUNT(*) as word_count
-                FROM tokens
-                WHERE token ILIKE ? AND {time_expr} IS NOT NULL AND {where_clause}
-                GROUP BY time_val
-            """
-            token_params = (token, *params)
-            
-        res_token = safe_execute(conn, query_token, token_params).fetchall()
-        token_map = {str(r[0]): r[1] for r in res_token if r[0] is not None}
         
         # 3. Assemble time series dataframe
         time_series = []
