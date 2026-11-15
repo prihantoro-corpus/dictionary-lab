@@ -15,6 +15,42 @@ CORPORA_DIR = os.path.join(os.getcwd(), "corpora")
 # Maximum number of corpora that can be loaded simultaneously on Streamlit Cloud
 MAX_CORPORA_CLOUD = 3
 
+WORDLIST_DEFAULTS_BY_LANGUAGE = {
+    'English': {'AWL', 'CEFR', 'GSL'},
+    'Indonesian': {'USER-DEFINED: ID-TBIK'},
+}
+
+def _apply_wordlist_language_defaults():
+    """Tick/untick wordlists by default based on the selected corpus language.
+    Only runs when the language changes, so manual choices are kept afterwards."""
+    lang = st.session_state.get('corpus_language', 'English')
+    if st.session_state.get('_wl_defaults_lang') == lang:
+        return
+    st.session_state['_wl_defaults_lang'] = lang
+    defaults = WORDLIST_DEFAULTS_BY_LANGUAGE.get(lang)
+    if defaults is None:
+        return  # other languages: leave current selection untouched
+    try:
+        from wordlist import manager as wl_manager
+        names = set(wl_manager.load_wordlists().keys())
+        if wl_manager.HAS_CEFR:
+            names.add('CEFR')
+    except Exception:
+        return
+    active = st.session_state.setdefault('active_wordlists', {})
+    for name in names:
+        on = name in defaults
+        active[name] = on
+        st.session_state[f"wl_cb_{name}"] = on  # main Wordlists checkbox
+        if name.startswith('USER-DEFINED: '):
+            # matching checkbox in the "User-Defined Wordlists" expander
+            try:
+                for f in os.listdir("wordlist"):
+                    if f.endswith('.txt') and f"USER-DEFINED: {os.path.splitext(f)[0].upper()}" == name:
+                        st.session_state[f"wl_cb_{f}"] = on
+            except Exception:
+                pass
+
 def _is_streamlit_cloud():
     """Detect if running on Streamlit Community Cloud."""
     return os.environ.get('STREAMLIT_SHARING_MODE') is not None or os.path.exists('/mount/src')
@@ -708,6 +744,12 @@ def render():
                 st.session_state['staged_files'] = []
                 st.session_state['staged_builtin'] = []
                 st.rerun()
+
+    # --- Language-based wordlist defaults ---
+    # When the corpus language changes, reset which wordlists are ticked:
+    #   English    -> AWL, CEFR, GSL on; everything else off
+    #   Indonesian -> USER-DEFINED: ID-TBIK on; everything else off
+    _apply_wordlist_language_defaults()
 
     # --- User-Defined Wordlists ---
     with st.sidebar.expander("📝 User-Defined Wordlists", expanded=False):

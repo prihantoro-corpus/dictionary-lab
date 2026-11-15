@@ -220,7 +220,13 @@ def check_token(token, lemma=None, language='English'):
             badges.append({'name': list_name, 'value': found_val})
             
     # Check CEFR (Library)
-    if HAS_CEFR:
+    cefr_active = True
+    try:
+        import streamlit as st
+        cefr_active = st.session_state.get('active_wordlists', {}).get('CEFR', True)
+    except Exception:
+        pass
+    if HAS_CEFR and cefr_active:
         try:
             analyzer = CEFRAnalyzer()
             # Try token first
