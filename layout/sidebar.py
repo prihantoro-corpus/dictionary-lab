@@ -20,10 +20,30 @@ WORDLIST_DEFAULTS_BY_LANGUAGE = {
     'Indonesian': {'USER-DEFINED: ID-TBIK'},
 }
 
+# Built-in corpus filename prefix -> language
+CORPUS_PREFIX_LANGUAGE = {
+    'bawe': 'English', 'en': 'English',
+    'id': 'Indonesian', 'jv': 'Javanese', 'ar': 'Arabic',
+    'ch': 'Chinese', 'jp': 'Japanese', 'kr': 'Korean',
+}
+
+def _infer_loaded_corpus_language():
+    """Infer language from loaded built-in corpus names (e.g. 'id-koslat-full', 'BAWE').
+    Returns a language only if all loaded corpora agree, else None."""
+    import re as _re
+    langs = set()
+    for name in st.session_state.get('loaded_corpora', []) or []:
+        prefix = _re.split(r'[-_ ]', str(name).lower(), maxsplit=1)[0]
+        lang = CORPUS_PREFIX_LANGUAGE.get(prefix)
+        if lang is None:
+            return None
+        langs.add(lang)
+    return langs.pop() if len(langs) == 1 else None
+
 def _apply_wordlist_language_defaults():
     """Tick/untick wordlists by default based on the selected corpus language.
     Only runs when the language changes, so manual choices are kept afterwards."""
-    lang = st.session_state.get('corpus_language', 'English')
+    lang = _infer_loaded_corpus_language() or st.session_state.get('corpus_language', 'English')
     if st.session_state.get('_wl_defaults_lang') == lang:
         return
     st.session_state['_wl_defaults_lang'] = lang
