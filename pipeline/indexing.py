@@ -114,9 +114,9 @@ def get_connection(read_only=False, allow_fallback=True):
             try:
                 import multiprocessing
                 import tempfile
-                cpus = max(2, multiprocessing.cpu_count())
+                cpus = min(2, max(1, multiprocessing.cpu_count()))
                 st.session_state.duckdb_conn.execute("SET preserve_insertion_order=false")
-                st.session_state.duckdb_conn.execute("PRAGMA memory_limit='512MB'")
+                st.session_state.duckdb_conn.execute("PRAGMA memory_limit='1GB'")
                 st.session_state.duckdb_conn.execute(f"PRAGMA threads={cpus}")
                 temp_dir = tempfile.gettempdir().replace('\\', '/')
                 st.session_state.duckdb_conn.execute(f"PRAGMA temp_directory='{temp_dir}'")
@@ -131,9 +131,9 @@ def get_connection(read_only=False, allow_fallback=True):
         try:
             import multiprocessing
             import tempfile
-            cpus = max(2, multiprocessing.cpu_count())
+            cpus = min(2, max(1, multiprocessing.cpu_count()))
             conn.execute("SET preserve_insertion_order=false")
-            conn.execute("PRAGMA memory_limit='512MB'")
+            conn.execute("PRAGMA memory_limit='1GB'")
             conn.execute(f"PRAGMA threads={cpus}")
             temp_dir = tempfile.gettempdir().replace('\\', '/')
             conn.execute(f"PRAGMA temp_directory='{temp_dir}'")
@@ -161,6 +161,15 @@ def safe_execute(conn, query, params=(), retries=3):
                 if i < retries - 1:
                     time.sleep(1 * (i + 1))
                     continue
+            if isinstance(e, duckdb.OutOfMemoryException) and i < retries - 1:
+                # Retry single-threaded: lowest per-query memory footprint
+                try:
+                    import gc
+                    gc.collect()
+                    conn.execute("PRAGMA threads=1")
+                except Exception:
+                    pass
+                continue
             raise e
 
 def init_db(conn=None):
