@@ -40,11 +40,70 @@ def _infer_loaded_corpus_language():
         langs.add(lang)
     return langs.pop() if len(langs) == 1 else None
 
+def _on_source_language_change():
+    """Source Language radio callback.
+    Keeps a copy of the language that survives the radio being hidden (Streamlit drops
+    widget state when a widget is not rendered) and asks wordlist defaults to follow it."""
+    lang = st.session_state.get('corpus_language', 'English')
+    st.session_state['_source_language'] = lang
+    st.session_state['_wl_lang_request'] = lang
+
+def _wordlist_widget_keys(name):
+    """All checkbox keys controlling one wordlist (main list + User-Defined expander)."""
+    keys = [f"wl_cb_{name}"]
+    if name.startswith('USER-DEFINED: '):
+        try:
+            for f in os.listdir("wordlist"):
+                if f.endswith('.txt') and f"USER-DEFINED: {os.path.splitext(f)[0].upper()}" == name:
+                    keys.append(f"wl_cb_{f}")
+        except Exception:
+            pass
+    return keys
+
+def _on_wordlist_toggle(name, widget_key):
+    """Checkbox callback: store the choice and mirror it to the twin checkbox."""
+    val = bool(st.session_state.get(widget_key, True))
+    st.session_state.setdefault('active_wordlists', {})[name] = val
+    for k in _wordlist_widget_keys(name):
+        if k != widget_key:
+            st.session_state[k] = val
+
+def _wordlist_checkbox(name, label, widget_key):
+    """Renders a wordlist checkbox whose state lives in st.session_state['active_wordlists']."""
+    active = st.session_state.setdefault('active_wordlists', {})
+    if name not in active:
+        active[name] = True  # Default to active if newly added
+    if st.session_state.get(widget_key) != active[name]:
+        st.session_state[widget_key] = active[name]
+    val = st.checkbox(label, key=widget_key, on_change=_on_wordlist_toggle, args=(name, widget_key))
+    active[name] = val
+    return val
+
+def _wordlist_target_language():
+    """Decides which language the wordlist defaults should follow (latest change wins):
+    1. the user picked a Source Language,
+    2. the loaded corpora changed -> detect from built-in corpus names, else Source Language,
+    3. very first run -> same as 2.
+    Returns None when nothing changed."""
+    ss = st.session_state
+    source_lang = ss.get('_source_language') or ss.get('corpus_language', 'English')
+    lang = ss.pop('_wl_lang_request', None)
+
+    loaded_sig = tuple(sorted(ss.get('loaded_corpora', []) or []))
+    if ss.get('_wl_loaded_sig') != loaded_sig:
+        ss['_wl_loaded_sig'] = loaded_sig
+        if lang is None and loaded_sig:
+            lang = _infer_loaded_corpus_language() or source_lang
+
+    if lang is None and '_wl_defaults_lang' not in ss:
+        lang = _infer_loaded_corpus_language() or source_lang
+    return lang
+
 def _apply_wordlist_language_defaults():
-    """Tick/untick wordlists by default based on the selected corpus language.
+    """Tick/untick wordlists by default based on the corpus language.
     Only runs when the language changes, so manual choices are kept afterwards."""
-    lang = _infer_loaded_corpus_language() or st.session_state.get('corpus_language', 'English')
-    if st.session_state.get('_wl_defaults_lang') == lang:
+    lang = _wordlist_target_language()
+    if not lang or st.session_state.get('_wl_defaults_lang') == lang:
         return
     st.session_state['_wl_defaults_lang'] = lang
     defaults = WORDLIST_DEFAULTS_BY_LANGUAGE.get(lang)
@@ -61,15 +120,8 @@ def _apply_wordlist_language_defaults():
     for name in names:
         on = name in defaults
         active[name] = on
-        st.session_state[f"wl_cb_{name}"] = on  # main Wordlists checkbox
-        if name.startswith('USER-DEFINED: '):
-            # matching checkbox in the "User-Defined Wordlists" expander
-            try:
-                for f in os.listdir("wordlist"):
-                    if f.endswith('.txt') and f"USER-DEFINED: {os.path.splitext(f)[0].upper()}" == name:
-                        st.session_state[f"wl_cb_{f}"] = on
-            except Exception:
-                pass
+        for k in _wordlist_widget_keys(name):
+            st.session_state[k] = on
 
 def _is_streamlit_cloud():
     """Detect if running on Streamlit Community Cloud."""
@@ -228,7 +280,8 @@ def render():
     if 'is_parallel' not in st.session_state:
         st.session_state['is_parallel'] = False
     if 'corpus_language' not in st.session_state:
-        st.session_state['corpus_language'] = 'English'
+        # Restore the last chosen Source Language (widget state is dropped while the radio is hidden)
+        st.session_state['corpus_language'] = st.session_state.get('_source_language', 'English')
     if 'target_language' not in st.session_state:
         st.session_state['target_language'] = 'Indonesian'
     
@@ -272,7 +325,8 @@ def render():
                 st.radio(
                     "Source Language", 
                     lang_options, 
-                    key="corpus_language"
+                    key="corpus_language",
+                    on_change=_on_source_language_change
                 )
             else:
                 st.info("🔗 **Parallel Mode Active**")
@@ -283,7 +337,8 @@ def render():
                     st.radio(
                         "Source Language", 
                         lang_options, 
-                        key="corpus_language"
+                        key="corpus_language",
+                        on_change=_on_source_language_change
                     )
                 with colB:
                     if 'target_language' not in st.session_state or st.session_state['target_language'] not in lang_options:
@@ -766,7 +821,8 @@ def render():
                 st.rerun()
 
     # --- Language-based wordlist defaults ---
-    # When the corpus language changes, reset which wordlists are ticked:
+    # When the corpus language changes (Source Language radio, or the language detected
+    # from loaded built-in corpus names), reset which wordlists are ticked:
     #   English    -> AWL, CEFR, GSL on; everything else off
     #   Indonesian -> USER-DEFINED: ID-TBIK on; everything else off
     _apply_wordlist_language_defaults()
@@ -809,12 +865,7 @@ def render():
                     
                 for f in val_files:
                     list_key = f"USER-DEFINED: {os.path.splitext(f)[0].upper()}"
-                    # Default to active if newly added
-                    if list_key not in st.session_state['active_wordlists']:
-                        st.session_state['active_wordlists'][list_key] = True
-                        
-                    is_active = st.checkbox(f, value=st.session_state['active_wordlists'][list_key], key=f"wl_cb_{f}")
-                    st.session_state['active_wordlists'][list_key] = is_active
+                    _wordlist_checkbox(list_key, f, f"wl_cb_{f}")
         except:
             pass
 
@@ -949,15 +1000,7 @@ def render():
             st.caption("No wordlists found in `wordlist/` folder.")
         else:
             for wl_name in sorted(all_wl_names):
-                if wl_name not in st.session_state['active_wordlists']:
-                    st.session_state['active_wordlists'][wl_name] = True
-                    
-                cb_val = st.checkbox(
-                    f"🏷️ {wl_name}",
-                    value=st.session_state['active_wordlists'][wl_name],
-                    key=f"wl_cb_{wl_name}"
-                )
-                st.session_state['active_wordlists'][wl_name] = cb_val
+                _wordlist_checkbox(wl_name, f"🏷️ {wl_name}", f"wl_cb_{wl_name}")
                 
         st.write("---")
         if st.button("📊 Open Vocabulary Profiler", key="btn_open_profiler", use_container_width=True):
