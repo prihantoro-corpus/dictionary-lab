@@ -1,5 +1,6 @@
 import streamlit as st
 import duckdb
+from pipeline.converters import SUPPORTED_UPLOAD_TYPES, ConvertedFile
 import os
 import json
 import tempfile
@@ -352,11 +353,23 @@ def render():
             # Step 2: Show appropriate interface based on mode
             if st.session_state['corpus_selection_mode'] == "File Upload":
                 if not is_parallel:
-                    st.caption("📤 Upload one or more corpus files:")
-                    uploaded_files = st.file_uploader("Select files", type=None, accept_multiple_files=True, key="mono_upload")
+                    st.caption("📤 Upload one or more corpus files (DOCX, PDF):")
+                    uploaded_files = st.file_uploader(
+                        "Select files",
+                        type=SUPPORTED_UPLOAD_TYPES,
+                        accept_multiple_files=True,
+                        key="mono_upload"
+                    )
                     if uploaded_files:
-                        st.session_state['staged_files'] = uploaded_files
-                        st.info(f"📋 **{len(uploaded_files)} file(s) selected**")
+                        processed = []
+                        for uf in uploaded_files:
+                            try:
+                                with ConvertedFile(uf) as conv_path:
+                                    processed.append((uf.name, conv_path))
+                            except Exception as e:
+                                st.error(f"Failed to process {uf.name}: {e}")
+                        st.session_state['staged_files'] = processed
+                        st.info(f"📋 **{len(processed)} file(s) ready**")
                     else:
                         st.session_state['staged_files'] = []
                 else:
@@ -539,27 +552,21 @@ def render():
                 parser = ingest.CorpusParser()
                 
                 for uploaded_file in st.session_state['staged_files']:
-                    with st.spinner(f"Processing {uploaded_file.name}..."):
-                        tmp_fd, tmp_path = tempfile.mkstemp()
+                    # uploaded_file is a tuple (original_name, conv_path)
+                    original_name, conv_path = uploaded_file
+                    corpus_name_display = os.path.splitext(original_name)[0]
+                    with st.spinner(f"Processing {original_name}..."):
                         try:
-                            with os.fdopen(tmp_fd, 'wb') as tmp:
-                                tmp.write(uploaded_file.getvalue())
-                            
-                            corpus_name_display = os.path.splitext(uploaded_file.name)[0]
-                            try:
-                                start_time = time.time()
-                                parser.process_file(tmp_path, corpus_name_display, lang_code=st.session_state.get('corpus_language', 'English'))
-                                end_time = time.time()
-                                loaded_names.append(corpus_name_display)
-                                st.success(f"Corpus '{corpus_name_display}' successfully loaded in {end_time - start_time:.2f} seconds.")
-                            except Exception as e:
-                                if "used by another process" in str(e):
-                                    st.error(f"❌ Failed to load {uploaded_file.name}: Database locked by another process.")
-                                else:
-                                    st.error(f"❌ Failed to load {uploaded_file.name}: {e}")
-                        finally:
-                            if os.path.exists(tmp_path):
-                                os.remove(tmp_path)
+                            start_time = time.time()
+                            parser.process_file(conv_path, corpus_name_display, lang_code=st.session_state.get('corpus_language', 'English'))
+                            end_time = time.time()
+                            loaded_names.append(corpus_name_display)
+                            st.success(f"Corpus '{corpus_name_display}' successfully loaded in {end_time - start_time:.2f} seconds.")
+                        except Exception as e:
+                            if "used by another process" in str(e):
+                                st.error(f"❌ Failed to load {original_name}: Database locked by another process.")
+                            else:
+                                st.error(f"❌ Failed to load {original_name}: {e}")
             
             # 2. Process Parallel Uploads
             elif is_parallel and st.session_state.get('staged_parallel'):
