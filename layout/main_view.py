@@ -183,7 +183,7 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
 
     if no_corpora:
         st.info("💡 **Getting Started**: Select one or more corpora from the sidebar to begin searching and indexing.")
-        st.caption("You can also upload your own files or choose from the 'Available on Disk' collection.")
+        st.caption("You can also upload your own files or choose from the 'Built-in Corpora' collection.")
 
 
     
