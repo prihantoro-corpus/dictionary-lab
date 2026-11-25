@@ -190,8 +190,23 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
     # ── Frozen header: title → corpus notice → nav → search box ────────
     st.markdown("""
     <style>
-    /* Make the header AND each Streamlit wrapper around it sticky,
-       but never the wrapper that also contains the page body. */
+    /* Title fixed inside Streamlit's top toolbar bar */
+    #cortex-title {
+        position: fixed;
+        top: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 1200;
+        font-size: 1rem;
+        font-weight: 700;
+        letter-spacing: 2px;
+        white-space: nowrap;
+        line-height: 2.875rem;
+        pointer-events: none;
+        color: inherit;
+        opacity: 0.85;
+    }
+    /* Sticky sub-header (corpus notice / nav / search) */
     div.st-key-sticky_header,
     [data-testid="stMainBlockContainer"] div:has(div.st-key-sticky_header):not(:has(div.st-key-main_body)),
     .block-container div:has(div.st-key-sticky_header):not(:has(div.st-key-main_body)) {
@@ -203,25 +218,18 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
         box-shadow: 0 6px 12px -8px color-mix(in srgb, currentColor 40%, transparent);
         gap: 0.35rem !important;
     }
-    /* Theme-adaptive background: inherit the real app background
-       (set by Streamlit on .stApp) down every ancestor to the header. */
     .stApp *:has(div.st-key-sticky_header),
     div.st-key-sticky_header {
         background-color: inherit !important;
     }
-    div.st-key-sticky_header h1 {margin: 0 !important; padding: 0.1rem 0 !important;
-        font-size: 1.45rem !important; letter-spacing: 1px; color: inherit;}
     div.st-key-sticky_header div[data-testid="stAlert"] {padding: 0.25rem 0.6rem !important;}
     div.st-key-sticky_header div[data-testid="stAlert"] p {font-size: 0.85rem; margin: 0 !important;}
     </style>
+    <div id="cortex-title">CORTEX DICTIONARY LAB</div>
     """, unsafe_allow_html=True)
 
     header = st.container(key="sticky_header")
     with header:
-        st.markdown(
-            '<h1 style="text-align: center;">CORTEX DICTIONARY LAB</h1>',
-            unsafe_allow_html=True
-        )
         loaded_corpora = st.session_state.get('loaded_corpora', [])
         if loaded_corpora:
             st.info(f"📚 **Actively Analyzing Corpus:** {', '.join(loaded_corpora)}")
