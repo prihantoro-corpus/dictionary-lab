@@ -1160,11 +1160,18 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
 
         # Tags from BOTH corpus and overrides
         corpus_tags = list(grouped.groups.keys()) if grouped is not None else []
-        all_display_tags = sorted(list(set(corpus_tags + list(query_overrides.keys()))))
+        all_display_tags_unsorted = list(set(corpus_tags + list(query_overrides.keys())))
         
         # Calculate Corpus Hash (for Caching)
         # We use the total token count of the current filtered corpus as a proxy for versioning.
         corpus_hash = frequency.get_total_tokens(where_clause, params)
+        
+        # Sort senses by per-sense frequency (highest first)
+        def _sense_freq(tag):
+            m = cache.get_metrics(corpus_hash, query, where_clause, params, pos_tag=tag)
+            override_f = query_overrides.get(tag, {}).get('frequency')
+            return override_f if override_f is not None else m.get('frequency', 0)
+        all_display_tags = sorted(all_display_tags_unsorted, key=_sense_freq, reverse=True)
         
         # Sense Tabs + Add Sense
         sense_labels = [f"Sense: {tag}" for tag in all_display_tags]

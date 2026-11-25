@@ -147,7 +147,8 @@ def safe_execute(conn, query, params=(), retries=3):
     start_time = time.time()
     for i in range(retries):
         try:
-            res = conn.execute(query, params)
+            cur = conn.cursor()
+            res = cur.execute(query, params)
             duration = time.time() - start_time
             if duration > 1.0: # Log slow queries (> 1s)
                  try:
@@ -157,7 +158,7 @@ def safe_execute(conn, query, params=(), retries=3):
             return res
         except Exception as e:
             msg = str(e)
-            if "used by another process" in msg or "TransactionContext Error" in msg:
+            if "used by another process" in msg or "TransactionContext Error" in msg or "connection is busy" in msg or "Resource In Use" in msg:
                 if i < retries - 1:
                     time.sleep(1 * (i + 1))
                     continue
