@@ -1542,40 +1542,161 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                 with classic_tabs[1]:
                     # Pattern Gram (experimental POS‑tagged N‑grams)
                     st.subheader("Pattern Gram")
+                    st.caption("Each pattern shows the POS context around the target word (W). Ranked by strength.")
+
                     raw_ngrams = cache.get_ngrams(
                         corpus_hash, query,
                         where_clause=where_clause, params=params,
                         stop_words=stop_words, skip_punct=skip_punct,
                         pos_tag=tag, include_tags=True,
                     )
+
+                    # Build pattern_groups: {pattern: [(ngram, freq), ...]}
                     pattern_groups: dict[str, list[tuple[str, int]]] = {}
                     for _cat, rows in raw_ngrams.items():
                         for ngram, pos, freq in rows:
                             tokens = ngram.split()
                             if len(tokens) == 2:
-                                key = f"W+{pos}" if tokens[0] == query else f"{pos}+W"
+                                pg_key = f"W+{pos}" if tokens[0] == query else f"{pos}+W"
                             elif len(tokens) == 3:
                                 if tokens[0] == query:
-                                    key = f"W+X+{pos}"
+                                    pg_key = f"W+X+{pos}"
                                 elif tokens[1] == query:
-                                    key = f"W+{pos}+X"
+                                    pg_key = f"W+{pos}+X"
                                 elif tokens[2] == query:
-                                    key = f"{pos}+W+X"
+                                    pg_key = f"{pos}+W+X"
                                 else:
-                                    key = f"{pos}+X+W"
+                                    pg_key = f"{pos}+X+W"
                             else:
                                 continue
-                            pattern_groups.setdefault(key, []).append((ngram, freq))
+                            pattern_groups.setdefault(pg_key, []).append((ngram, freq))
 
-                    for pattern, items in pattern_groups.items():
-                        top_items = sorted(items, key=lambda x: x[1], reverse=True)[:3]
-                        if not top_items:
-                            continue
-                        with st.expander(f"{pattern} ({uuid.uuid4().hex[:4]})"):
-                            render_ngram_badges(
-                                top_items,
-                                key_prefix=f"exp_{pattern}_{query}_{tag}"
+                    if not pattern_groups:
+                        st.info("No POS-tagged n-gram data available for this word/tag.")
+                    else:
+                        # Compute rank metrics per pattern
+                        pattern_stats = {}
+                        for pg_key, items in pattern_groups.items():
+                            agg_freq = sum(f for _, f in items)
+                            n_patterns = len(items)
+                            pattern_stats[pg_key] = {
+                                "agg_freq": agg_freq,
+                                "n_patterns": n_patterns,
+                                "items": sorted(items, key=lambda x: x[1], reverse=True)
+                            }
+
+                        # Ranking basis selector
+                        rank_basis = st.radio(
+                            "Rank patterns by:",
+                            ["Aggregate Frequency", "Number of Patterns Captured"],
+                            index=0,
+                            horizontal=True,
+                            key=f"pg_rank_{query}_{tag}"
+                        )
+
+                        if rank_basis == "Aggregate Frequency":
+                            sort_key = "agg_freq"
+                            size_label = "Agg. Freq"
+                        else:
+                            sort_key = "n_patterns"
+                            size_label = "# Patterns"
+
+                        # Sort patterns by chosen metric (descending = rank 1 = strongest)
+                        ranked = sorted(
+                            pattern_stats.items(),
+                            key=lambda kv: kv[1][sort_key],
+                            reverse=True
+                        )
+
+                        # ── Word-cloud Bubble Chart ────────────────────────────
+                        import plotly.graph_objects as go_pg
+                        import numpy as np
+                        rng_pg = np.random.default_rng(42)
+
+                        labels  = [pg_key for pg_key, _ in ranked]
+                        weights = [stats[sort_key] for _, stats in ranked]
+                        agg_freqs = [stats["agg_freq"] for _, stats in ranked]
+                        n_pats  = [stats["n_patterns"] for _, stats in ranked]
+
+                        n = len(labels)
+                        # Normalize weights → bubble sizes (20–90)
+                        w_arr = np.array(weights, dtype=float)
+                        if w_arr.max() > w_arr.min():
+                            norm_w = (w_arr - w_arr.min()) / (w_arr.max() - w_arr.min())
+                        else:
+                            norm_w = np.ones(n)
+                        bubble_sizes = (20 + norm_w * 70).tolist()
+
+                        # Layout: pack in a grid-ish spiral so bigger bubbles come first
+                        cols_pg = max(3, int(np.ceil(np.sqrt(n * 1.6))))
+                        xs, ys = [], []
+                        for idx in range(n):
+                            xs.append((idx % cols_pg) + rng_pg.uniform(-0.15, 0.15))
+                            ys.append(-(idx // cols_pg) + rng_pg.uniform(-0.1, 0.1))
+
+                        # Colour palette cycling
+                        palette = [
+                            "#1976D2","#388E3C","#F57C00","#7B1FA2",
+                            "#0097A7","#C62828","#558B2F","#4527A0",
+                            "#00838F","#E65100","#283593","#2E7D32",
+                        ]
+                        colors = [palette[i % len(palette)] for i in range(n)]
+
+                        hover = [
+                            f"<b>{lbl}</b><br>Agg. Freq: {af}<br># Patterns: {np_v}<br><br>"
+                            + "<br>".join(f"• {ng} ({fr})" for ng, fr in pattern_stats[lbl]["items"][:5])
+                            for lbl, af, np_v in zip(labels, agg_freqs, n_pats)
+                        ]
+
+                        fig_pg = go_pg.Figure()
+                        fig_pg.add_trace(go_pg.Scatter(
+                            x=xs, y=ys,
+                            mode="markers+text",
+                            text=labels,
+                            textposition="middle center",
+                            hovertext=hover,
+                            hoverinfo="text",
+                            marker=dict(
+                                size=bubble_sizes,
+                                color=colors,
+                                opacity=0.85,
+                                line=dict(width=1, color="white")
+                            ),
+                            textfont=dict(color="white", size=11, family="monospace")
+                        ))
+
+                        rank_height = max(300, int(80 * (n // cols_pg + 1)))
+                        fig_pg.update_layout(
+                            showlegend=False,
+                            hovermode="closest",
+                            margin=dict(l=10, r=10, t=30, b=10),
+                            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                            plot_bgcolor="white",
+                            height=rank_height,
+                            title=dict(
+                                text=f"Pattern strength by {size_label} — larger bubble = stronger pattern",
+                                font=dict(size=12, color="#555"),
+                                x=0.5
                             )
+                        )
+                        st.plotly_chart(fig_pg, use_container_width=True)
+
+                        # ── Ranked Expanders ──────────────────────────────────
+                        st.caption(f"Patterns ranked #1 → #{n} by **{rank_basis}**")
+                        for rank_i, (pg_key, stats) in enumerate(ranked, 1):
+                            agg_f = stats["agg_freq"]
+                            n_p   = stats["n_patterns"]
+                            top_items = stats["items"][:5]
+                            label_str = (
+                                f"#{rank_i}  {pg_key}   "
+                                f"| Agg. Freq: {agg_f}  | {n_p} pattern{'s' if n_p != 1 else ''}"
+                            )
+                            with st.expander(label_str, expanded=(rank_i == 1)):
+                                render_ngram_badges(
+                                    top_items,
+                                    key_prefix=f"pg_{rank_i}_{pg_key}_{query}_{tag}"
+                                )
                 
                 # Bigram/Trigram Manual Overrides
                 bi_over = parse_manual_list(override.get('manual_bigrams', ''))
