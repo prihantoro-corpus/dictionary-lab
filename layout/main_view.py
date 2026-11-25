@@ -1622,17 +1622,10 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                             "#AD1457", "#E65100", "#283593", "#00695C",
                         ]
 
-                        # Centre-out ordering: strongest in the middle,
-                        # weaker ones alternate to the left and right.
-                        order: list[int] = []
-                        for i in range(n):
-                            if i % 2 == 0:
-                                order.append(i)
-                            else:
-                                order.insert(0, i)
-
+                        # Rank order: strongest first (top-left), flowing
+                        # left-to-right and wrapping to the next line.
                         spans = []
-                        for i in order:
+                        for i in range(n):
                             pg_key, stats = ranked[i]
                             w = stats[sort_key]
                             # sqrt scaling keeps small patterns readable
@@ -1644,7 +1637,7 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                             weight = 800 if norm > 0.6 else (600 if norm > 0.3 else 500)
                             opacity = 0.65 + 0.35 * norm
                             color = palette[i % len(palette)]
-                            rotate = "rotate(-90deg)" if (i % 5 == 3 and norm < 0.5) else "none"
+                            rotate = "none"
                             examples = "&#10;".join(
                                 f"• {html_pg.escape(ng)} ({fr})" for ng, fr in stats["items"][:5]
                             )
@@ -1662,7 +1655,7 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                         cloud_html = f"""
                         <style>
                         .pg-cloud {{
-                            display:flex; flex-wrap:wrap; justify-content:center; align-items:center;
+                            display:flex; flex-wrap:wrap; justify-content:flex-start; align-items:baseline;
                             gap:6px 18px; padding:28px 20px; border-radius:14px;
                             background:radial-gradient(circle at center, #ffffff 0%, #f3f6fb 100%);
                             border:1px solid #e3e8f0; min-height:180px;
