@@ -1633,7 +1633,7 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                                 norm = (math.sqrt(w) - math.sqrt(w_min)) / (math.sqrt(w_max) - math.sqrt(w_min))
                             else:
                                 norm = 1.0
-                            size = 14 + norm * 46          # 14px → 60px
+                            size = 12 + norm * 26          # 12px → 38px
                             weight = 800 if norm > 0.6 else (600 if norm > 0.3 else 500)
                             opacity = 0.65 + 0.35 * norm
                             color = palette[i % len(palette)]
@@ -1656,9 +1656,9 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                         <style>
                         .pg-cloud {{
                             display:flex; flex-wrap:wrap; justify-content:flex-start; align-items:baseline;
-                            gap:6px 18px; padding:28px 20px; border-radius:14px;
+                            gap:2px 14px; padding:10px 14px; border-radius:10px;
                             background:radial-gradient(circle at center, #ffffff 0%, #f3f6fb 100%);
-                            border:1px solid #e3e8f0; min-height:180px;
+                            border:1px solid #e3e8f0;
                         }}
                         .pg-word {{
                             display:inline-block; line-height:1.05; cursor:default;
@@ -1671,28 +1671,28 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                         }}
                         </style>
                         <div class='pg-cloud'>{''.join(spans)}</div>
-                        <div style='text-align:center;color:#777;font-size:12px;margin-top:6px;'>
-                            Word size = {size_label} · hover a pattern for details
+                        <div style='text-align:right;color:#888;font-size:11px;margin:2px 0 6px;'>
+                            Word size = {size_label} · hover for details
                         </div>
                         """
                         cloud_html = "".join(ln.strip() for ln in cloud_html.splitlines())
                         st.markdown(cloud_html, unsafe_allow_html=True)
 
-                        # ── Ranked Expanders ──────────────────────────────────
-                        st.caption(f"Patterns ranked #1 → #{n} by **{rank_basis}**")
-                        for rank_i, (pg_key, stats) in enumerate(ranked, 1):
-                            agg_f = stats["agg_freq"]
-                            n_p   = stats["n_patterns"]
-                            top_items = stats["items"][:5]
-                            label_str = (
-                                f"#{rank_i}  {pg_key}   "
-                                f"| Agg. Freq: {agg_f}  | {n_p} pattern{'s' if n_p != 1 else ''}"
-                            )
-                            with st.expander(label_str, expanded=(rank_i == 1)):
-                                render_ngram_badges(
-                                    top_items,
-                                    key_prefix=f"pg_{rank_i}_{pg_key}_{query}_{tag}"
-                                )
+                        # ── Ranked Expanders (3-column grid) ──────────────────
+                        st.caption(f"Patterns ranked #1 → #{n} by **{rank_basis}** (left→right, top→bottom)")
+                        n_cols_pg = 3
+                        for row_start in range(0, n, n_cols_pg):
+                            row_cols = st.columns(n_cols_pg)
+                            for offset, (pg_key, stats) in enumerate(ranked[row_start:row_start + n_cols_pg]):
+                                rank_i = row_start + offset + 1
+                                agg_f = stats["agg_freq"]
+                                n_p   = stats["n_patterns"]
+                                with row_cols[offset]:
+                                    with st.expander(f"#{rank_i} {pg_key} · {agg_f} · {n_p}p"):
+                                        render_ngram_badges(
+                                            stats["items"][:5],
+                                            key_prefix=f"pg_{rank_i}_{pg_key}_{query}_{tag}"
+                                        )
                 
                 # Bigram/Trigram Manual Overrides
                 bi_over = parse_manual_list(override.get('manual_bigrams', ''))
