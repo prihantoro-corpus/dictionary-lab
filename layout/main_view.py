@@ -999,7 +999,7 @@ def render_multiword_view(query, where_clause, params, stop_words, collocate_fil
                             col_tag = item.get('tag', '')
                             score_val = item.get('score', 0)
                             freq_val = item.get('freq', 0)
-                            st.button(f"{col_txt} ({score_val:.1f})", key=f"p_coll_{col_txt}_{col_tag}", help=f"Freq: {freq_val}", use_container_width=True, on_click=cb_search_token, args=(col_txt,))
+                            st.button(f"{col_txt} ({score_val:.1f} LL)", key=f"p_coll_{col_txt}_{col_tag}", help=f"Frequency: {freq_val}\nLog-Likelihood (LL): {score_val:.2f}", use_container_width=True, on_click=cb_search_token, args=(col_txt,))
                             
         with c_tab2:
             st.caption("Collocates positioned by left/right dominance. Distance = Strength.")
@@ -1702,9 +1702,9 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                                         freq_val = item.get('freq', 0)
                                         
                                         if st.button(
-                                            f"{col_txt} ({score_val:.1f})", 
+                                            f"{col_txt} ({score_val:.1f} LL)", 
                                             key=f"coll_{col_txt}_{col_tag}_{tag}", 
-                                            help=f"Frequency: {freq_val}\nLog-Likelihood: {score_val:.2f}",
+                                            help=f"Frequency: {freq_val}\nLog-Likelihood (LL): {score_val:.2f}",
                                             use_container_width=True
                                         ):
                                             st.session_state.query = col_txt

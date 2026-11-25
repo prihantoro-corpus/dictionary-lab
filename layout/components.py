@@ -261,7 +261,7 @@ def render_collocate_chart(collocates, node_word="", chart_size=1.0, examples_di
             kwic_ex = highlight_word(kwic_ex, node_word, "#d32f2f")
             kwic_ex = highlight_word(kwic_ex, item['word'], "#1976d2")
             
-        hover_texts.append(f"<span style='font-size: 14px;'><b>{item['word']}</b><br>Score: {item['score']:.2f}<br><br><i>{kwic_ex}</i></span>")
+        hover_texts.append(f"<span style='font-size: 14px;'><b>{item['word']}</b><br>LL: {item['score']:.2f}<br><br><i>{kwic_ex}</i></span>")
         
     fig.add_trace(go.Scatter(
         x=node_x, y=node_y,
