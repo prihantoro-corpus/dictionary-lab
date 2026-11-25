@@ -181,12 +181,6 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
     if 'search_box' not in st.session_state:
         st.session_state.search_box = ""
 
-    if no_corpora:
-        st.info("💡 **Getting Started**: Select one or more corpora from the sidebar to begin searching and indexing.")
-        st.caption("You can also upload your own files or choose from the 'Built-in Corpora' collection.")
-
-
-    
     # ── Frozen header: title → corpus notice → nav → search box ────────
     st.markdown("""
     <style>
@@ -224,10 +218,16 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
 
     header = st.container(key="sticky_header")
     with header:
-        st.markdown('<p id="cortex-title-bar">CORTEX DICTIONARY LAB</p>', unsafe_allow_html=True)
         loaded_corpora = st.session_state.get('loaded_corpora', [])
-        if loaded_corpora:
-            st.info(f"📚 **Actively Analyzing Corpus:** {', '.join(loaded_corpora)}")
+        # Title + status on one row
+        col_title, col_status = st.columns([1, 4])
+        with col_title:
+            st.markdown('<p id="cortex-title-bar">CORTEX DICTIONARY LAB</p>', unsafe_allow_html=True)
+        with col_status:
+            if loaded_corpora:
+                st.info(f"📚 **Actively Analyzing Corpus:** {', '.join(loaded_corpora)}")
+            else:
+                st.info("💡 **Getting Started**: Select one or more corpora from the sidebar to begin searching and indexing.")
 
         nav = st.radio("Navigation", ["Search", "Word Tracker", "Corpus Statistic", "Vocabulary Profiler"], horizontal=True, label_visibility="collapsed", key="main_nav")
 
