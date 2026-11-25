@@ -229,7 +229,7 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
             else:
                 st.info("💡 **Getting Started**: Select one or more corpora from the sidebar to begin searching and indexing.")
 
-        nav = st.radio("Navigation", ["Search", "Word Tracker", "Corpus Statistic", "Vocabulary Profiler"], horizontal=True, label_visibility="collapsed", key="main_nav")
+        nav = st.radio("Navigation", ["Search", "Corpus Statistic", "Vocabulary Profiler"], horizontal=True, label_visibility="collapsed", key="main_nav")
 
         if nav == "Search":
             st.text_input(
@@ -1484,95 +1484,8 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                 
                 st.divider()
                 
-                # N-Grams
-                # Classic N‑grams layout (bigram left, trigram right) with tabs
-                classic_tabs = st.tabs(["Classic N‑grams", "Pattern Gram"])
-
-                with classic_tabs[0]:
-                    # Bigram/Trigram Manual Overrides
-                    bi_over = parse_manual_list(override.get('manual_bigrams', ''))
-                    tri_over = parse_manual_list(override.get('manual_trigrams', ''))
-
-                    if bi_over or tri_over:
-                        ngrams = {
-                            'bi_search_word': [(r[0], r[1]) for r in bi_over if len(r) >= 2],
-                            'bi_word_search': [],
-                            'tri_s_w_w': [(r[0], r[1]) for r in tri_over if len(r) >= 2],
-                            'tri_w_s_w': [],
-                            'tri_w_w_s': []
-                        }
-                    else:
-                        ngrams = cache.get_ngrams(
-                            corpus_hash, query,
-                            where_clause=where_clause, params=params,
-                            stop_words=stop_words, skip_punct=skip_punct,
-                            pos_tag=tag
-                        )
-
-                    c_bi, c_tri = st.columns([4, 6])  # Left: Bigrams, Right: Trigrams
-
-                    # ----- Bigrams (left) -----
-                    with c_bi:
-                        st.caption("**Bigrams**")
-                        b1, b2 = st.columns(2)
-                        with b1:
-                            st.caption(f"{query} + Word")
-                            render_ngram_badges(
-                                ngrams.get('bi_search_word', []),
-                                key_prefix=f"bi_fwd_{query}_{tag}"
-                            )
-                        with b2:
-                            st.caption(f"Word + {query}")
-                            render_ngram_badges(
-                                ngrams.get('bi_word_search', []),
-                                key_prefix=f"bi_bwd_{query}_{tag}"
-                            )
-
-                        # Download Bigrams block removed (duplicate).
-
-                    # ----- Trigrams (right) -----
-                    with c_tri:
-                        st.caption("**Trigrams**")
-                        t1, t2, t3 = st.columns(3)
-                        with t1:
-                            st.caption(f"{query}+W+W")
-                            render_ngram_badges(
-                                ngrams.get('tri_s_w_w', []),
-                                key_prefix=f"tri_fwd_{query}_{tag}"
-                            )
-                        with t2:
-                            st.caption(f"W+{query}+W")
-                            render_ngram_badges(
-                                ngrams.get('tri_w_s_w', []),
-                                key_prefix=f"tri_mid_{query}_{tag}"
-                            )
-                        with t3:
-                            st.caption(f"W+W+{query}")
-                            render_ngram_badges(
-                                ngrams.get('tri_w_w_s', []),
-                                key_prefix=f"tri_bwd_{query}_{tag}"
-                            )
-
-                        # Download Trigrams
-                        all_tri = []
-                        if ngrams['tri_s_w_w']:
-                            all_tri.extend([{'Type': f"{query}+W+W", 'Trigram': x[0], 'Freq': x[1]}
-                                            for x in ngrams['tri_s_w_w']])
-                        if ngrams['tri_w_s_w']:
-                            all_tri.extend([{'Type': f"W+{query}+W", 'Trigram': x[0], 'Freq': x[1]}
-                                            for x in ngrams['tri_w_s_w']])
-                        if ngrams['tri_w_w_s']:
-                            all_tri.extend([{'Type': f"W+W+{query}", 'Trigram': x[0], 'Freq': x[1]}
-                                            for x in ngrams['tri_w_w_s']])
-                        if all_tri:
-                            st.download_button(
-                                "📥 CSV",
-                                pd.DataFrame(all_tri).to_csv(index=False).encode('utf-8'),
-                                f"trigrams_{query}.csv", "text/csv",
-                                key=f"dl_tri_{query}_{tag}_{uuid.uuid4().hex[:8]}"
-                            )
-
-                with classic_tabs[1]:
+                # Pattern Gram
+                with st.tabs(["Pattern Gram"])[0]:
                     # Pattern Gram (experimental POS‑tagged N‑grams)
                     st.subheader("Pattern Gram")
                     st.caption("Each pattern shows the POS context around the target word (W). Ranked by strength.")
