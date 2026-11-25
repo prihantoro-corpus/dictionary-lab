@@ -190,21 +190,38 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
     # ── Frozen header: title → corpus notice → nav → search box ────────
     st.markdown("""
     <style>
-    div.st-key-sticky_header {
-        position: sticky; top: 2.875rem; z-index: 999;
-        background: var(--background-color, #0e1117);
-        background-color: rgb(14, 17, 23);
-        padding: 0.3rem 0 0.4rem; border-bottom: 1px solid rgba(255,255,255,0.12);
-        box-shadow: 0 4px 10px -6px rgba(0,0,0,0.5);
+    /* Make the header AND each Streamlit wrapper around it sticky,
+       but never the wrapper that also contains the page body. */
+    div.st-key-sticky_header,
+    [data-testid="stMainBlockContainer"] div:has(div.st-key-sticky_header):not(:has(div.st-key-main_body)),
+    .block-container div:has(div.st-key-sticky_header):not(:has(div.st-key-main_body)) {
+        position: sticky !important; top: 2.75rem; z-index: 990;
     }
-    div.st-key-sticky_header h1 {margin: 0 0 0.2rem !important;}
+    div.st-key-sticky_header {
+        background: #ffffff;
+        padding: 0.35rem 0.6rem 0.5rem; border-radius: 0 0 10px 10px;
+        border-bottom: 1px solid rgba(0,0,0,0.08);
+        box-shadow: 0 6px 12px -8px rgba(0,0,0,0.25);
+        gap: 0.35rem !important;
+    }
+    @media (prefers-color-scheme: dark) {
+        div.st-key-sticky_header {
+            background: #0e1117;
+            border-bottom: 1px solid rgba(255,255,255,0.10);
+            box-shadow: 0 6px 12px -8px rgba(0,0,0,0.7);
+        }
+    }
+    div.st-key-sticky_header h1 {margin: 0 !important; padding: 0.1rem 0 !important;
+        font-size: 1.45rem !important; letter-spacing: 1px; color: inherit;}
+    div.st-key-sticky_header div[data-testid="stAlert"] {padding: 0.25rem 0.6rem !important;}
+    div.st-key-sticky_header div[data-testid="stAlert"] p {font-size: 0.85rem; margin: 0 !important;}
     </style>
     """, unsafe_allow_html=True)
 
     header = st.container(key="sticky_header")
     with header:
         st.markdown(
-            '<h1 style="text-align: center; color: #ffffff;">CORTEX DICTIONARY LAB</h1>',
+            '<h1 style="text-align: center;">CORTEX DICTIONARY LAB</h1>',
             unsafe_allow_html=True
         )
         loaded_corpora = st.session_state.get('loaded_corpora', [])
@@ -217,17 +234,19 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
             st.text_input(
                 "Search word:",
                 placeholder="Enter a word to see its dictionary entry...",
-                key="search_box"
+                key="search_box",
+                label_visibility="collapsed"
             )
-    
-    if nav == "Corpus Statistic":
-        render_entry_tab(where_clause, params)
-    elif nav == "Vocabulary Profiler":
-        render_profiler_tab(where_clause, params)
-    elif nav == "Word Tracker":
-        render_word_tracker_tab(where_clause, params)
-    else:
-        render_search_tab(where_clause, params, stop_words, collocate_filter, skip_punct)
+
+    with st.container(key="main_body"):
+        if nav == "Corpus Statistic":
+            render_entry_tab(where_clause, params)
+        elif nav == "Vocabulary Profiler":
+            render_profiler_tab(where_clause, params)
+        elif nav == "Word Tracker":
+            render_word_tracker_tab(where_clause, params)
+        else:
+            render_search_tab(where_clause, params, stop_words, collocate_filter, skip_punct)
 
 def _natural_sort_key(s):
     """Sorts strings naturally, e.g. 'Sublist 2' before 'Sublist 10', with 'Not in Wordlist' last."""
