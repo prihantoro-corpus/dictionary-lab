@@ -187,27 +187,38 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
 
 
     
-    # Main Title
-    st.markdown(
-        '<h1 style="text-align: center; color: #ffffff; margin-bottom: 20px;">CORTEX DICTIONARY LAB</h1>',
-        unsafe_allow_html=True
-    )
-    
-    # Persistent Corpus Notification
-    loaded_corpora = st.session_state.get('loaded_corpora', [])
-    if loaded_corpora:
-        st.info(f"📚 **Actively Analyzing Corpus:** {', '.join(loaded_corpora)}")
-    
-    # Custom CSS for Professional Look
+    # ── Frozen header: title → corpus notice → nav → search box ────────
     st.markdown("""
     <style>
-    /* ... CSS kept ... */
+    div.st-key-sticky_header {
+        position: sticky; top: 2.875rem; z-index: 999;
+        background: var(--background-color, #0e1117);
+        background-color: rgb(14, 17, 23);
+        padding: 0.3rem 0 0.4rem; border-bottom: 1px solid rgba(255,255,255,0.12);
+        box-shadow: 0 4px 10px -6px rgba(0,0,0,0.5);
+    }
+    div.st-key-sticky_header h1 {margin: 0 0 0.2rem !important;}
     </style>
     """, unsafe_allow_html=True)
 
-    # Navigation Tabs
-    # We use a radio button styled as tabs or just simple toggle
-    nav = st.radio("Navigation", ["Search", "Word Tracker", "Corpus Statistic", "Vocabulary Profiler"], horizontal=True, label_visibility="collapsed", key="main_nav")
+    header = st.container(key="sticky_header")
+    with header:
+        st.markdown(
+            '<h1 style="text-align: center; color: #ffffff;">CORTEX DICTIONARY LAB</h1>',
+            unsafe_allow_html=True
+        )
+        loaded_corpora = st.session_state.get('loaded_corpora', [])
+        if loaded_corpora:
+            st.info(f"📚 **Actively Analyzing Corpus:** {', '.join(loaded_corpora)}")
+
+        nav = st.radio("Navigation", ["Search", "Word Tracker", "Corpus Statistic", "Vocabulary Profiler"], horizontal=True, label_visibility="collapsed", key="main_nav")
+
+        if nav == "Search":
+            st.text_input(
+                "Search word:",
+                placeholder="Enter a word to see its dictionary entry...",
+                key="search_box"
+            )
     
     if nav == "Corpus Statistic":
         render_entry_tab(where_clause, params)
@@ -1061,12 +1072,7 @@ def render_multiword_view(query, where_clause, params, stop_words, collocate_fil
 
 
 def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_punct):
-    # Search input - the widget automatically syncs with st.session_state.search_box
-    st.text_input(
-        "Search word:", 
-        placeholder="Enter a word to see its dictionary entry...",
-        key="search_box"
-    )
+    # Search input is rendered in the frozen header (see render()).
 
     # Use the widget's current value as the query
     query = st.session_state.search_box.strip()
