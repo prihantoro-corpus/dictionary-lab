@@ -1585,21 +1585,22 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                     )
 
                     # Build pattern_groups: {pattern: [(ngram, freq), ...]}
+                    # Labels use the actual search term and W for the other word position.
                     pattern_groups: dict[str, list[tuple[str, int]]] = {}
                     for _cat, rows in raw_ngrams.items():
                         for ngram, pos, freq in rows:
                             tokens = ngram.split()
                             if len(tokens) == 2:
-                                pg_key = f"W+{pos}" if tokens[0] == query else f"{pos}+W"
+                                pg_key = f"{query}+{pos}" if tokens[0] == query else f"{pos}+{query}"
                             elif len(tokens) == 3:
                                 if tokens[0] == query:
-                                    pg_key = f"W+X+{pos}"
+                                    pg_key = f"{query}+W+{pos}"
                                 elif tokens[1] == query:
-                                    pg_key = f"W+{pos}+X"
+                                    pg_key = f"{pos}+{query}+W"
                                 elif tokens[2] == query:
-                                    pg_key = f"{pos}+W+X"
+                                    pg_key = f"{pos}+W+{query}"
                                 else:
-                                    pg_key = f"{pos}+X+W"
+                                    pg_key = f"{pos}+W+{query}"
                             else:
                                 continue
                             pattern_groups.setdefault(pg_key, []).append((ngram, freq))
