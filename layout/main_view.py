@@ -190,23 +190,7 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
     # ── Frozen header: title → corpus notice → nav → search box ────────
     st.markdown("""
     <style>
-    /* Title fixed inside Streamlit's top toolbar bar */
-    #cortex-title {
-        position: fixed;
-        top: 0;
-        left: 50%;
-        transform: translateX(-50%);
-        z-index: 1200;
-        font-size: 1rem;
-        font-weight: 700;
-        letter-spacing: 2px;
-        white-space: nowrap;
-        line-height: 2.875rem;
-        pointer-events: none;
-        color: inherit;
-        opacity: 0.85;
-    }
-    /* Sticky sub-header (corpus notice / nav / search) */
+    /* Sticky sub-header */
     div.st-key-sticky_header,
     [data-testid="stMainBlockContainer"] div:has(div.st-key-sticky_header):not(:has(div.st-key-main_body)),
     .block-container div:has(div.st-key-sticky_header):not(:has(div.st-key-main_body)) {
@@ -224,12 +208,23 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
     }
     div.st-key-sticky_header div[data-testid="stAlert"] {padding: 0.25rem 0.6rem !important;}
     div.st-key-sticky_header div[data-testid="stAlert"] p {font-size: 0.85rem; margin: 0 !important;}
+    /* Title row */
+    #cortex-title-bar {
+        text-align: center;
+        font-size: 0.85rem;
+        font-weight: 700;
+        letter-spacing: 2.5px;
+        opacity: 0.6;
+        margin: 0;
+        padding: 0;
+        line-height: 1.4;
+    }
     </style>
-    <div id="cortex-title">CORTEX DICTIONARY LAB</div>
     """, unsafe_allow_html=True)
 
     header = st.container(key="sticky_header")
     with header:
+        st.markdown('<p id="cortex-title-bar">CORTEX DICTIONARY LAB</p>', unsafe_allow_html=True)
         loaded_corpora = st.session_state.get('loaded_corpora', [])
         if loaded_corpora:
             st.info(f"📚 **Actively Analyzing Corpus:** {', '.join(loaded_corpora)}")
