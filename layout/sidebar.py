@@ -248,15 +248,18 @@ def render():
     st.markdown(
         """
         <style>
-        div[data-baseweb="select"] {
-            z-index: 1000 !important;
+        section[data-testid="stSidebar"] div[data-baseweb="select"] {
+            z-index: 100 !important;
             pointer-events: auto !important;
         }
-        div[data-baseweb="popover"], div[data-baseweb="menu"], div[role="listbox"], ul[role="listbox"] {
-            z-index: 999999 !important;
+        section[data-testid="stSidebar"] div[data-baseweb="popover"],
+        section[data-testid="stSidebar"] div[data-baseweb="menu"],
+        section[data-testid="stSidebar"] div[role="listbox"],
+        section[data-testid="stSidebar"] ul[role="listbox"] {
+            z-index: 200 !important;
             pointer-events: auto !important;
         }
-        li[role="option"] {
+        section[data-testid="stSidebar"] li[role="option"] {
             cursor: pointer !important;
             pointer-events: auto !important;
         }
