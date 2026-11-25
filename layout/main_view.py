@@ -1608,79 +1608,82 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                             reverse=True
                         )
 
-                        # ── Word-cloud Bubble Chart ────────────────────────────
-                        import plotly.graph_objects as go_pg
-                        import numpy as np
-                        rng_pg = np.random.default_rng(42)
+                        # ── Word Cloud (HTML/CSS) ─────────────────────────────
+                        import html as html_pg
+                        import math
 
-                        labels  = [pg_key for pg_key, _ in ranked]
+                        n = len(ranked)
                         weights = [stats[sort_key] for _, stats in ranked]
-                        agg_freqs = [stats["agg_freq"] for _, stats in ranked]
-                        n_pats  = [stats["n_patterns"] for _, stats in ranked]
+                        w_max, w_min = max(weights), min(weights)
 
-                        n = len(labels)
-                        # Normalize weights → bubble sizes (20–90)
-                        w_arr = np.array(weights, dtype=float)
-                        if w_arr.max() > w_arr.min():
-                            norm_w = (w_arr - w_arr.min()) / (w_arr.max() - w_arr.min())
-                        else:
-                            norm_w = np.ones(n)
-                        bubble_sizes = (20 + norm_w * 70).tolist()
-
-                        # Layout: pack in a grid-ish spiral so bigger bubbles come first
-                        cols_pg = max(3, int(np.ceil(np.sqrt(n * 1.6))))
-                        xs, ys = [], []
-                        for idx in range(n):
-                            xs.append((idx % cols_pg) + rng_pg.uniform(-0.15, 0.15))
-                            ys.append(-(idx // cols_pg) + rng_pg.uniform(-0.1, 0.1))
-
-                        # Colour palette cycling
                         palette = [
-                            "#1976D2","#388E3C","#F57C00","#7B1FA2",
-                            "#0097A7","#C62828","#558B2F","#4527A0",
-                            "#00838F","#E65100","#283593","#2E7D32",
-                        ]
-                        colors = [palette[i % len(palette)] for i in range(n)]
-
-                        hover = [
-                            f"<b>{lbl}</b><br>Agg. Freq: {af}<br># Patterns: {np_v}<br><br>"
-                            + "<br>".join(f"• {ng} ({fr})" for ng, fr in pattern_stats[lbl]["items"][:5])
-                            for lbl, af, np_v in zip(labels, agg_freqs, n_pats)
+                            "#1565C0", "#2E7D32", "#EF6C00", "#6A1B9A",
+                            "#00838F", "#C62828", "#558B2F", "#4527A0",
+                            "#AD1457", "#E65100", "#283593", "#00695C",
                         ]
 
-                        fig_pg = go_pg.Figure()
-                        fig_pg.add_trace(go_pg.Scatter(
-                            x=xs, y=ys,
-                            mode="markers+text",
-                            text=labels,
-                            textposition="middle center",
-                            hovertext=hover,
-                            hoverinfo="text",
-                            marker=dict(
-                                size=bubble_sizes,
-                                color=colors,
-                                opacity=0.85,
-                                line=dict(width=1, color="white")
-                            ),
-                            textfont=dict(color="white", size=11, family="monospace")
-                        ))
+                        # Centre-out ordering: strongest in the middle,
+                        # weaker ones alternate to the left and right.
+                        order: list[int] = []
+                        for i in range(n):
+                            if i % 2 == 0:
+                                order.append(i)
+                            else:
+                                order.insert(0, i)
 
-                        rank_height = max(300, int(80 * (n // cols_pg + 1)))
-                        fig_pg.update_layout(
-                            showlegend=False,
-                            hovermode="closest",
-                            margin=dict(l=10, r=10, t=30, b=10),
-                            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                            plot_bgcolor="white",
-                            height=rank_height,
-                            title=dict(
-                                text=f"Pattern strength by {size_label} — larger bubble = stronger pattern",
-                                font=dict(size=12, color="#555"),
-                                x=0.5
+                        spans = []
+                        for i in order:
+                            pg_key, stats = ranked[i]
+                            w = stats[sort_key]
+                            # sqrt scaling keeps small patterns readable
+                            if w_max > w_min:
+                                norm = (math.sqrt(w) - math.sqrt(w_min)) / (math.sqrt(w_max) - math.sqrt(w_min))
+                            else:
+                                norm = 1.0
+                            size = 14 + norm * 46          # 14px → 60px
+                            weight = 800 if norm > 0.6 else (600 if norm > 0.3 else 500)
+                            opacity = 0.65 + 0.35 * norm
+                            color = palette[i % len(palette)]
+                            rotate = "rotate(-90deg)" if (i % 5 == 3 and norm < 0.5) else "none"
+                            examples = "&#10;".join(
+                                f"• {html_pg.escape(ng)} ({fr})" for ng, fr in stats["items"][:5]
                             )
-                        )
-                        st.plotly_chart(fig_pg, use_container_width=True)
+                            tip = (
+                                f"#{i + 1} {html_pg.escape(pg_key)}&#10;"
+                                f"Agg. Freq: {stats['agg_freq']}&#10;"
+                                f"Patterns: {stats['n_patterns']}&#10;&#10;{examples}"
+                            )
+                            spans.append(
+                                f"<span class='pg-word' title='{tip}' style='font-size:{size:.0f}px;"
+                                f"font-weight:{weight};color:{color};opacity:{opacity:.2f};"
+                                f"transform:{rotate};'>{html_pg.escape(pg_key)}</span>"
+                            )
+
+                        cloud_html = f"""
+                        <style>
+                        .pg-cloud {{
+                            display:flex; flex-wrap:wrap; justify-content:center; align-items:center;
+                            gap:6px 18px; padding:28px 20px; border-radius:14px;
+                            background:radial-gradient(circle at center, #ffffff 0%, #f3f6fb 100%);
+                            border:1px solid #e3e8f0; min-height:180px;
+                        }}
+                        .pg-word {{
+                            display:inline-block; line-height:1.05; cursor:default;
+                            font-family:'Segoe UI', 'Inter', sans-serif; letter-spacing:-0.5px;
+                            transition:transform .15s ease, opacity .15s ease, text-shadow .15s ease;
+                        }}
+                        .pg-word:hover {{
+                            opacity:1 !important; transform:scale(1.15) !important;
+                            text-shadow:0 2px 8px rgba(0,0,0,.18);
+                        }}
+                        </style>
+                        <div class='pg-cloud'>{''.join(spans)}</div>
+                        <div style='text-align:center;color:#777;font-size:12px;margin-top:6px;'>
+                            Word size = {size_label} · hover a pattern for details
+                        </div>
+                        """
+                        cloud_html = "".join(ln.strip() for ln in cloud_html.splitlines())
+                        st.markdown(cloud_html, unsafe_allow_html=True)
 
                         # ── Ranked Expanders ──────────────────────────────────
                         st.caption(f"Patterns ranked #1 → #{n} by **{rank_basis}**")
