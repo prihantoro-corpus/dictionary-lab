@@ -198,18 +198,16 @@ def render(where_clause="1=1", params=(), stop_words=None, collocate_filter=None
         position: sticky !important; top: 2.75rem; z-index: 990;
     }
     div.st-key-sticky_header {
-        background: #ffffff;
         padding: 0.35rem 0.6rem 0.5rem; border-radius: 0 0 10px 10px;
-        border-bottom: 1px solid rgba(0,0,0,0.08);
-        box-shadow: 0 6px 12px -8px rgba(0,0,0,0.25);
+        border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+        box-shadow: 0 6px 12px -8px color-mix(in srgb, currentColor 40%, transparent);
         gap: 0.35rem !important;
     }
-    @media (prefers-color-scheme: dark) {
-        div.st-key-sticky_header {
-            background: #0e1117;
-            border-bottom: 1px solid rgba(255,255,255,0.10);
-            box-shadow: 0 6px 12px -8px rgba(0,0,0,0.7);
-        }
+    /* Theme-adaptive background: inherit the real app background
+       (set by Streamlit on .stApp) down every ancestor to the header. */
+    .stApp *:has(div.st-key-sticky_header),
+    div.st-key-sticky_header {
+        background-color: inherit !important;
     }
     div.st-key-sticky_header h1 {margin: 0 !important; padding: 0.1rem 0 !important;
         font-size: 1.45rem !important; letter-spacing: 1px; color: inherit;}
