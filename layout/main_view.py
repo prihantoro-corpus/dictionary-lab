@@ -12,6 +12,7 @@ from layout import components
 from pipeline.overrides_io import save_overrides
 from utils.ai_helper import get_ai_helper
 import matplotlib.pyplot as plt
+import uuid
 
 def parse_manual_list(text, delimiter="|"):
     """Parses text area input into a list of dicts/tuples."""
@@ -44,10 +45,15 @@ def render_ngram_badges(ngrams, key_prefix="ngram"):
     if not ngrams:
         st.caption("-")
         return
-    for i, row in enumerate(ngrams[:3]): # Show top 3
+    for i, row in enumerate(ngrams[:3]):  # Show top 3
         text = row[0]
         freq = row[1]
-        st.button(f"{text} ({freq})", key=f"{key_prefix}_{i}_{text}", use_container_width=True, on_click=cb_search_token, args=(text,))
+        safe_text = text.replace(' ', '_')
+        unique_id = uuid.uuid4().hex[:8]
+        safe_key = f"{key_prefix}_{i}_{safe_text}_{unique_id}"
+        st.button(f"{text} ({freq})", key=safe_key,
+                  use_container_width=True,
+                  on_click=cb_search_token, args=(text,))
 
 def render_sense_editor(token, tag, initial_data, where_clause="1=1", params=()):
     """
@@ -925,9 +931,34 @@ def render_multiword_view(query, where_clause, params, stop_words, collocate_fil
         st.caption("Word + Phrase")
         render_ngram_badges(ngrams.get('backward', []), key_prefix=f"phrase_bwd_{query}")
 
-    # 8. Collocates (Graph/List)
-    st.divider()
-    st.subheader("Top-20 Collocates")
+    # 7b. Experimental POS‑grouped N‑grams
+    st.subheader("N‑gram (experimental)")
+    # Get forward bigrams with POS tags (include_tags=True)
+    exp_ngrams = cache.get_ngrams(
+        corpus_hash,
+        query,
+        limit=1000,
+        where_clause=where_clause,
+        params=params,
+        stop_words=stop_words,
+        skip_punct=skip_punct,
+        pos_tag=None,
+        include_tags=True,
+    )
+    forward_tagged = exp_ngrams.get('bi_search_word', [])
+    # Aggregate by POS tag
+    tag_groups = {}
+    tag_totals = {}
+    for ngram, tag, freq in forward_tagged:
+        tag_groups.setdefault(tag, []).append((ngram, freq))
+        tag_totals[tag] = tag_totals.get(tag, 0) + freq
+    # Select top 3 POS tags by total frequency
+    top_tags = sorted(tag_totals.items(), key=lambda x: x[1], reverse=True)[:3]
+    for tag, _ in top_tags:
+        items = sorted(tag_groups[tag], key=lambda x: x[1], reverse=True)[:3]
+        with st.expander(f"{tag}"):
+            render_ngram_badges(items, key_prefix=f"exp_{query}_{tag}")
+
     
     color_options = {
         "Nouns (Blue)": ['NN', 'NNS', 'NP', 'NPS', 'NNP', 'NNPS'],
@@ -1402,7 +1433,7 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                             plt.tight_layout()
                             st.pyplot(fig_v)
 
-                st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+                st.empty()  # minimal vertical spacer (replaces 10px div)
                 
                 # Form to Edit
                 render_sense_editor(query, tag, {
@@ -1421,7 +1452,130 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                 st.divider()
                 
                 # N-Grams
-                st.subheader("N-Grams")
+                # Classic N‑grams layout (bigram left, trigram right) with tabs
+                classic_tabs = st.tabs(["Classic N‑grams", "Pattern Gram"])
+
+                with classic_tabs[0]:
+                    # Bigram/Trigram Manual Overrides
+                    bi_over = parse_manual_list(override.get('manual_bigrams', ''))
+                    tri_over = parse_manual_list(override.get('manual_trigrams', ''))
+
+                    if bi_over or tri_over:
+                        ngrams = {
+                            'bi_search_word': [(r[0], r[1]) for r in bi_over if len(r) >= 2],
+                            'bi_word_search': [],
+                            'tri_s_w_w': [(r[0], r[1]) for r in tri_over if len(r) >= 2],
+                            'tri_w_s_w': [],
+                            'tri_w_w_s': []
+                        }
+                    else:
+                        ngrams = cache.get_ngrams(
+                            corpus_hash, query,
+                            where_clause=where_clause, params=params,
+                            stop_words=stop_words, skip_punct=skip_punct,
+                            pos_tag=tag
+                        )
+
+                    c_bi, c_tri = st.columns([4, 6])  # Left: Bigrams, Right: Trigrams
+
+                    # ----- Bigrams (left) -----
+                    with c_bi:
+                        st.caption("**Bigrams**")
+                        b1, b2 = st.columns(2)
+                        with b1:
+                            st.caption(f"{query} + Word")
+                            render_ngram_badges(
+                                ngrams.get('bi_search_word', []),
+                                key_prefix=f"bi_fwd_{query}_{tag}"
+                            )
+                        with b2:
+                            st.caption(f"Word + {query}")
+                            render_ngram_badges(
+                                ngrams.get('bi_word_search', []),
+                                key_prefix=f"bi_bwd_{query}_{tag}"
+                            )
+
+                        # Download Bigrams block removed (duplicate).
+
+                    # ----- Trigrams (right) -----
+                    with c_tri:
+                        st.caption("**Trigrams**")
+                        t1, t2, t3 = st.columns(3)
+                        with t1:
+                            st.caption(f"{query}+W+W")
+                            render_ngram_badges(
+                                ngrams.get('tri_s_w_w', []),
+                                key_prefix=f"tri_fwd_{query}_{tag}"
+                            )
+                        with t2:
+                            st.caption(f"W+{query}+W")
+                            render_ngram_badges(
+                                ngrams.get('tri_w_s_w', []),
+                                key_prefix=f"tri_mid_{query}_{tag}"
+                            )
+                        with t3:
+                            st.caption(f"W+W+{query}")
+                            render_ngram_badges(
+                                ngrams.get('tri_w_w_s', []),
+                                key_prefix=f"tri_bwd_{query}_{tag}"
+                            )
+
+                        # Download Trigrams
+                        all_tri = []
+                        if ngrams['tri_s_w_w']:
+                            all_tri.extend([{'Type': f"{query}+W+W", 'Trigram': x[0], 'Freq': x[1]}
+                                            for x in ngrams['tri_s_w_w']])
+                        if ngrams['tri_w_s_w']:
+                            all_tri.extend([{'Type': f"W+{query}+W", 'Trigram': x[0], 'Freq': x[1]}
+                                            for x in ngrams['tri_w_s_w']])
+                        if ngrams['tri_w_w_s']:
+                            all_tri.extend([{'Type': f"W+W+{query}", 'Trigram': x[0], 'Freq': x[1]}
+                                            for x in ngrams['tri_w_w_s']])
+                        if all_tri:
+                            st.download_button(
+                                "📥 CSV",
+                                pd.DataFrame(all_tri).to_csv(index=False).encode('utf-8'),
+                                f"trigrams_{query}.csv", "text/csv",
+                                key=f"dl_tri_{query}_{tag}_{uuid.uuid4().hex[:8]}"
+                            )
+
+                with classic_tabs[1]:
+                    # Pattern Gram (experimental POS‑tagged N‑grams)
+                    st.subheader("Pattern Gram")
+                    raw_ngrams = cache.get_ngrams(
+                        corpus_hash, query,
+                        where_clause=where_clause, params=params,
+                        stop_words=stop_words, skip_punct=skip_punct,
+                        pos_tag=tag, include_tags=True,
+                    )
+                    pattern_groups: dict[str, list[tuple[str, int]]] = {}
+                    for _cat, rows in raw_ngrams.items():
+                        for ngram, pos, freq in rows:
+                            tokens = ngram.split()
+                            if len(tokens) == 2:
+                                key = f"W+{pos}" if tokens[0] == query else f"{pos}+W"
+                            elif len(tokens) == 3:
+                                if tokens[0] == query:
+                                    key = f"W+X+{pos}"
+                                elif tokens[1] == query:
+                                    key = f"W+{pos}+X"
+                                elif tokens[2] == query:
+                                    key = f"{pos}+W+X"
+                                else:
+                                    key = f"{pos}+X+W"
+                            else:
+                                continue
+                            pattern_groups.setdefault(key, []).append((ngram, freq))
+
+                    for pattern, items in pattern_groups.items():
+                        top_items = sorted(items, key=lambda x: x[1], reverse=True)[:3]
+                        if not top_items:
+                            continue
+                        with st.expander(f"{pattern} ({uuid.uuid4().hex[:4]})"):
+                            render_ngram_badges(
+                                top_items,
+                                key_prefix=f"exp_{pattern}_{query}_{tag}"
+                            )
                 
                 # Bigram/Trigram Manual Overrides
                 bi_over = parse_manual_list(override.get('manual_bigrams', ''))
@@ -1438,8 +1592,12 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                 else:
                     ngrams = cache.get_ngrams(corpus_hash, query, where_clause=where_clause, params=params, stop_words=stop_words, skip_punct=skip_punct, pos_tag=tag)
 
-                c_bi, c_tri = st.columns([4, 6])
-                
+                c_bi, c_tri = st.columns([4, 6])  # Left: Bigrams, Right: Trigrams
+
+# Trigram block moved below (duplicate removed)
+
+
+                # Bigram side (left)
                 with c_bi:
                     st.caption("**Bigrams**")
                     b1, b2 = st.columns(2)
@@ -1449,13 +1607,23 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                     with b2:
                         st.caption(f"Word + {query}")
                         render_ngram_badges(ngrams.get('bi_word_search', []), key_prefix=f"bi_bwd_{query}_{tag}")
-                    
+
+                    # Download Bigrams (unique key)
+                    all_bi = []
+                    if ngrams['bi_search_word']:
+                        all_bi.extend([{'Type': f"{query}+Word", 'Bigram': x[0], 'Freq': x[1]} for x in ngrams['bi_search_word']])
+                    if ngrams['bi_word_search']:
+                        all_bi.extend([{'Type': f"Word+{query}", 'Bigram': x[0], 'Freq': x[1]} for x in ngrams['bi_word_search']])
+                    if all_bi:
+                        st.download_button("📥 CSV", pd.DataFrame(all_bi).to_csv(index=False).encode('utf-8'), f"bigrams_{query}.csv", "text/csv", key=f"dl_bi_{query}_{tag}_{uuid.uuid4().hex[:8]}")
+
                     # Download Bigrams
                     all_bi = []
-                    if ngrams['bi_search_word']: all_bi.extend([{'Type': f"{query}+Word", 'Bigram': x[0], 'Freq': x[1]} for x in ngrams['bi_search_word']])
-                    if ngrams['bi_word_search']: all_bi.extend([{'Type': f"Word+{query}", 'Bigram': x[0], 'Freq': x[1]} for x in ngrams['bi_word_search']])
-                    if all_bi:
-                        st.download_button("📥 CSV", pd.DataFrame(all_bi).to_csv(index=False).encode('utf-8'), f"bigrams_{query}.csv", "text/csv", key=f"dl_bi_{query}_{tag}")
+                    if ngrams['bi_search_word']:
+                        all_bi.extend([{'Type': f"{query}+Word", 'Bigram': x[0], 'Freq': x[1]} for x in ngrams['bi_search_word']])
+                    if ngrams['bi_word_search']:
+                        all_bi.extend([{'Type': f"Word+{query}", 'Bigram': x[0], 'Freq': x[1]} for x in ngrams['bi_word_search']])
+                # (duplicate download block removed)
 
 
                 with c_tri:
@@ -1477,8 +1645,11 @@ def render_search_tab(where_clause, params, stop_words, collocate_filter, skip_p
                     if ngrams['tri_w_s_w']: all_tri.extend([{'Type': f"W+{query}+W", 'Trigram': x[0], 'Freq': x[1]} for x in ngrams['tri_w_s_w']])
                     if ngrams['tri_w_w_s']: all_tri.extend([{'Type': f"W+W+{query}", 'Trigram': x[0], 'Freq': x[1]} for x in ngrams['tri_w_w_s']])
                     if all_tri:
-                        st.download_button("📥 CSV", pd.DataFrame(all_tri).to_csv(index=False).encode('utf-8'), f"trigrams_{query}.csv", "text/csv", key=f"dl_tri_{query}_{tag}")
+                        st.download_button("📥 CSV", pd.DataFrame(all_tri).to_csv(index=False).encode('utf-8'), f"trigrams_{query}.csv", "text/csv", key=f"dl_tri_{query}_{tag}_{uuid.uuid4().hex[:8]}")
 
+                    # Experimental POS‑tagged N‑grams block removed
+
+                    
                 
                 # Collocates
                 st.subheader("Top-20 Collocates")

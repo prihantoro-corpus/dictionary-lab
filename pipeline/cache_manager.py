@@ -18,8 +18,23 @@ def get_pmw_range(corpus_hash, where_clause="1=1", params=()):
     return frequency.get_pmw_range(where_clause, params)
 
 @st.cache_data(persist="disk", show_spinner=False)
-def get_ngrams(corpus_hash, token, limit=10, where_clause="1=1", params=(), stop_words=None, skip_punct=True, pos_tag=None):
-    return collocation.get_ngrams(token, limit, where_clause, params, stop_words, skip_punct, pos_tag)
+def get_ngrams(corpus_hash, token, limit=10, where_clause="1=1", params=(), stop_words=None, skip_punct=True, pos_tag=None, include_tags=False):
+    # Retrieve raw results from collocation (may include POS tag)
+    raw = collocation.get_ngrams(token, limit, where_clause, params, stop_words, skip_punct, pos_tag, include_tags)
+    if include_tags:
+        return raw
+    # Strip POS tag column if present, handling both 2‑tuple and 3‑tuple rows
+    cleaned = {}
+    for k, rows in raw.items():
+        cleaned_rows = []
+        for row in rows:
+            if len(row) == 3:
+                ngram, _, freq = row
+            else:
+                ngram, freq = row
+            cleaned_rows.append((ngram, freq))
+        cleaned[k] = cleaned_rows
+    return cleaned
 
 @st.cache_data(persist="disk", show_spinner=False)
 def get_collocates(corpus_hash, token, window=5, limit=20, where_clause="1=1", params=(), stop_words=None, allowed_words=None, skip_punct=True, pos_tag=None, v=3):

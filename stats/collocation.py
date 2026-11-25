@@ -60,7 +60,7 @@ def parse_collocate_filter(filter_list, alias="t2"):
     
     return " AND " + " AND ".join(clauses), params
 
-def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, skip_punct=True, pos_tag=None):
+def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, skip_punct=True, pos_tag=None, include_tags=False):
     conn, is_shared = get_connection()
     if stop_words is None: stop_words = []
     
@@ -95,14 +95,14 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, 
     results['bi_search_word'] = safe_execute(conn, f"""
         WITH {cte_matches},
         next_tokens AS (
-            SELECT t2.token as w2
+            SELECT t2.token as w2, t2.tag as tag
             FROM matches m
             JOIN tokens t2 ON m.id + 1 = t2.id AND m.file_id = t2.file_id
             WHERE 1=1 {apply_filter('t2')}
         )
-        SELECT ? || ' ' || w2, COUNT(*) as freq
+        SELECT ? || ' ' || w2 as ngram, tag, COUNT(*) as freq
         FROM next_tokens
-        GROUP BY w2
+        GROUP BY w2, tag
         ORDER BY freq DESC LIMIT ?
     """, (*base_params, *params, *neighbor_params, token, limit)).fetchall()
     
@@ -110,14 +110,14 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, 
     results['bi_word_search'] = safe_execute(conn, f"""
         WITH {cte_matches},
         prev_tokens AS (
-            SELECT t0.token as w0
+            SELECT t0.token as w0, t0.tag as tag
             FROM matches m
             JOIN tokens t0 ON m.id - 1 = t0.id AND m.file_id = t0.file_id
             WHERE 1=1 {apply_filter('t0')}
         )
-        SELECT w0 || ' ' || ?, COUNT(*) as freq
+        SELECT w0 || ' ' || ? as ngram, tag, COUNT(*) as freq
         FROM prev_tokens
-        GROUP BY w0
+        GROUP BY w0, tag
         ORDER BY freq DESC LIMIT ?
     """, (*base_params, *params, *neighbor_params, token, limit)).fetchall()
     
@@ -125,15 +125,15 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, 
     results['tri_s_w_w'] = safe_execute(conn, f"""
         WITH {cte_matches},
         next2 AS (
-            SELECT t1.token as w1, t2.token as w2
+            SELECT t1.token as w1, t2.token as w2, t2.tag as tag
             FROM matches m
             JOIN tokens t1 ON m.id + 1 = t1.id AND m.file_id = t1.file_id
             JOIN tokens t2 ON m.id + 2 = t2.id AND m.file_id = t2.file_id
             WHERE 1=1 {apply_filter('t1')} {apply_filter('t2')}
         )
-        SELECT ? || ' ' || w1 || ' ' || w2, COUNT(*) as freq
+        SELECT ? || ' ' || w1 || ' ' || w2 as ngram, tag, COUNT(*) as freq
         FROM next2
-        GROUP BY w1, w2
+        GROUP BY w1, w2, tag
         ORDER BY freq DESC LIMIT ?
     """, (*base_params, *params, *neighbor_params, *neighbor_params, token, limit)).fetchall()
     
@@ -141,15 +141,15 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, 
     results['tri_w_s_w'] = safe_execute(conn, f"""
         WITH {cte_matches},
         surround AS (
-            SELECT t0.token as w0, t2.token as w2
+            SELECT t0.token as w0, t2.token as w2, t2.tag as tag
             FROM matches m
             JOIN tokens t0 ON m.id - 1 = t0.id AND m.file_id = t0.file_id
             JOIN tokens t2 ON m.id + 1 = t2.id AND m.file_id = t2.file_id
             WHERE 1=1 {apply_filter('t0')} {apply_filter('t2')}
         )
-        SELECT w0 || ' ' || ? || ' ' || w2, COUNT(*) as freq
+        SELECT w0 || ' ' || ? || ' ' || w2 as ngram, tag, COUNT(*) as freq
         FROM surround
-        GROUP BY w0, w2
+        GROUP BY w0, w2, tag
         ORDER BY freq DESC LIMIT ?
     """, (*base_params, *params, *neighbor_params, *neighbor_params, token, limit)).fetchall()
 
@@ -157,20 +157,25 @@ def get_ngrams(token, limit=10, where_clause="1=1", params=(), stop_words=None, 
     results['tri_w_w_s'] = safe_execute(conn, f"""
         WITH {cte_matches},
         prev2 AS (
-            SELECT t0.token as w0, t1.token as w1
+            SELECT t0.token as w0, t1.token as w1, t0.tag as tag
             FROM matches m
             JOIN tokens t0 ON m.id - 2 = t0.id AND m.file_id = t0.file_id
             JOIN tokens t1 ON m.id - 1 = t1.id AND m.file_id = t1.file_id
             WHERE 1=1 {apply_filter('t0')} {apply_filter('t1')}
         )
-        SELECT w0 || ' ' || w1 || ' ' || ?, COUNT(*) as freq
+        SELECT w0 || ' ' || w1 || ' ' || ? as ngram, tag, COUNT(*) as freq
         FROM prev2
-        GROUP BY w0, w1
+        GROUP BY w0, w1, tag
         ORDER BY freq DESC LIMIT ?
     """, (*base_params, *params, *neighbor_params, *neighbor_params, token, limit)).fetchall()
     
     if not is_shared:
         conn.close()
+    # If tags are not requested, strip them from each result list
+    if not include_tags:
+        for key, rows in results.items():
+            # rows are (ngram, tag, freq)
+            results[key] = [(row[0], row[2]) for row in rows]
     return results
 
 def _get_ll_sql(o11, e11, o12, e12, o21, e21, o22, e22):
